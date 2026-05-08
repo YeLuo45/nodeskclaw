@@ -1608,6 +1608,7 @@ async def list_workspace_messages(
             "sender_name": m.sender_name,
             "content": m.content,
             "message_type": m.message_type,
+            "conversation_id": m.conversation_id,
             "attachments": m.attachments,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
