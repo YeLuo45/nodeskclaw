@@ -680,7 +680,7 @@ def _mkdir_body_from_path(path: str) -> dict[str, str]:
     parent_path, name = normalized.rsplit("/", 1)
     if not name:
         return {"error": "'path' must include a directory name for mkdir."}
-    parent_path = f"{parent_path or '/'}/"
+    parent_path = "/" if parent_path in {"", "/"} else f"{parent_path}/"
     return {"parent_path": parent_path, "name": name}
 
 

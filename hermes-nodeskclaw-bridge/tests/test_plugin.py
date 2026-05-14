@@ -382,6 +382,11 @@ def test_shared_files_mkdir_splits_path_for_backend(monkeypatch):
     assert recorded["method"] == "POST"
     assert recorded["body"] == {"parent_path": "/reports/", "name": "2026"}
 
+    payload = json.loads(plugin.shared_files_tool({"action": "mkdir", "path": "/news"}))
+
+    assert payload == {"code": 0, "data": {"id": "dir-1"}}
+    assert recorded["body"] == {"parent_path": "/", "name": "news"}
+
 
 def test_shared_files_tool_keeps_backend_error(monkeypatch):
     def fake_api_fetch(cfg, path, *, method="GET", body=None):
