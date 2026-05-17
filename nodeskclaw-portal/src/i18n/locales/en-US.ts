@@ -871,12 +871,17 @@ const enUS = {
     engineHermesDesc: "General-purpose runtime for long-running agents",
     skillEditor: {
       title: "Role & Prompts",
+      rolePromptTitle: "Base Prompt",
+      skillPromptTitle: "Skill Prompts",
       save: "Save Changes",
       saved: "Saved",
+      roleSaved: "Base prompt saved",
       saveFailed: "Save failed",
+      roleSaveFailed: "Failed to save base prompt",
       restartHint: "Restart required for changes to take effect",
       empty: "No skills",
       loadFailed: "Failed to load skill content",
+      roleLoadFailed: "Failed to load base prompt",
     },
   },
   runtimeDefaultCapabilities: {
@@ -1693,6 +1698,13 @@ const enUS = {
     },
     file: {
       invalid_base64: "File content format is invalid. Please upload the file again.",
+    },
+    managed_files: {
+      resource_not_found: "Managed file resource does not exist",
+      unsupported_runtime: "This runtime does not support the managed file resource",
+      path_outside_allowed_root: "Managed file path is outside the allowed directory",
+      config_parse_failed: "Runtime config cannot be parsed",
+      too_large: "File content exceeds the allowed size",
     },
     system: {
       internal_error: "Internal server error",

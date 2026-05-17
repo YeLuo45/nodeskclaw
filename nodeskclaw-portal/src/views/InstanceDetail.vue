@@ -309,14 +309,69 @@ interface SkillItem {
   type: string
 }
 
+interface ManagedFileContent {
+  key: string
+  runtime: string
+  rel_path: string
+  display_path: string
+  content: string
+  exists: boolean
+  content_type: string
+  requires_restart: boolean
+}
+
 const skillEditorOpen = ref(false)
+const rolePrompt = ref<ManagedFileContent | null>(null)
+const rolePromptContent = ref('')
+const rolePromptOriginal = ref('')
+const rolePromptLoading = ref(false)
+const rolePromptSaving = ref(false)
+const rolePromptError = ref('')
+const rolePromptDirty = computed(() => rolePromptContent.value !== rolePromptOriginal.value)
 const skills = ref<SkillItem[]>([])
+const skillsLoaded = ref(false)
 const activeSkill = ref('')
 const skillContent = ref('')
 const skillOriginal = ref('')
 const skillLoading = ref(false)
 const skillSaving = ref(false)
 const skillDirty = computed(() => skillContent.value !== skillOriginal.value)
+
+async function fetchRolePrompt() {
+  rolePromptLoading.value = true
+  rolePromptError.value = ''
+  try {
+    const res = await api.get(`/instances/${instanceId.value}/managed-files/role_prompt`)
+    rolePrompt.value = res.data?.data ?? null
+    rolePromptContent.value = rolePrompt.value?.content ?? ''
+    rolePromptOriginal.value = rolePromptContent.value
+  } catch (e: any) {
+    rolePrompt.value = null
+    rolePromptContent.value = ''
+    rolePromptOriginal.value = ''
+    rolePromptError.value = e?.response?.data?.message || t('instanceDetail.skillEditor.roleLoadFailed')
+  } finally {
+    rolePromptLoading.value = false
+  }
+}
+
+async function saveRolePrompt() {
+  if (rolePromptSaving.value || !canAdmin.value) return
+  rolePromptSaving.value = true
+  try {
+    const res = await api.put(`/instances/${instanceId.value}/managed-files/role_prompt`, {
+      content: rolePromptContent.value,
+    })
+    rolePrompt.value = res.data?.data ?? rolePrompt.value
+    rolePromptContent.value = rolePrompt.value?.content ?? rolePromptContent.value
+    rolePromptOriginal.value = rolePromptContent.value
+    toast.success(t('instanceDetail.skillEditor.roleSaved'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.message || t('instanceDetail.skillEditor.roleSaveFailed'))
+  } finally {
+    rolePromptSaving.value = false
+  }
+}
 
 async function fetchSkills() {
   try {
@@ -335,6 +390,8 @@ async function fetchSkills() {
     }
   } catch {
     skills.value = []
+  } finally {
+    skillsLoaded.value = true
   }
 }
 
@@ -377,7 +434,10 @@ async function saveSkillContent() {
 
 function toggleSkillEditor() {
   skillEditorOpen.value = !skillEditorOpen.value
-  if (skillEditorOpen.value && !skills.value.length) {
+  if (skillEditorOpen.value && !rolePrompt.value && !rolePromptLoading.value && !rolePromptError.value) {
+    fetchRolePrompt()
+  }
+  if (skillEditorOpen.value && !skillsLoaded.value) {
     fetchSkills()
   }
 }
@@ -598,52 +658,103 @@ function toggleSkillEditor() {
         </Button>
 
         <div v-if="skillEditorOpen" class="border-t border-border">
-          <div v-if="!skills.length && !skillLoading" class="px-4 py-8 text-center text-sm text-muted-foreground">
-            {{ t('instanceDetail.skillEditor.empty') }}
+          <div class="px-4 py-4 border-b border-border">
+            <div class="flex items-start justify-between gap-3 mb-3">
+              <div class="min-w-0">
+                <h3 class="text-sm font-medium">{{ t('instanceDetail.skillEditor.rolePromptTitle') }}</h3>
+                <p v-if="rolePrompt?.display_path" class="mt-1 text-xs text-muted-foreground font-mono break-all">
+                  {{ rolePrompt.display_path }}
+                </p>
+              </div>
+            </div>
+            <div v-if="rolePromptLoading" class="flex items-center justify-center py-12">
+              <Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+            <div v-else-if="rolePromptError" class="py-8 text-center text-sm text-muted-foreground">
+              {{ rolePromptError }}
+            </div>
+            <template v-else>
+              <Textarea
+                v-model="rolePromptContent"
+                class="w-full h-64 px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono resize-y scrollbar-compact"
+                :readonly="!canAdmin"
+                spellcheck="false"
+              />
+              <div class="flex items-center justify-between gap-3 mt-2">
+                <p class="text-xs text-muted-foreground">{{ t('instanceDetail.skillEditor.restartHint') }}</p>
+                <Button variant="unstyled" size="unstyled"
+                  v-if="canAdmin"
+                  class="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  :class="rolePromptDirty
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    : 'border border-border text-muted-foreground'"
+                  :disabled="!rolePromptDirty || rolePromptSaving"
+                  @click="saveRolePrompt"
+                >
+                  <Loader2 v-if="rolePromptSaving" class="w-3.5 h-3.5 animate-spin" />
+                  <Save v-else class="w-3.5 h-3.5" />
+                  {{ t('instanceDetail.skillEditor.save') }}
+                </Button>
+              </div>
+            </template>
           </div>
-          <template v-else>
-            <div class="flex gap-1 px-4 pt-3 pb-0 overflow-x-auto">
-              <Button variant="unstyled" size="unstyled"
-                v-for="s in skills"
-                :key="s.skill_name"
-                class="px-3 py-1.5 text-xs rounded-t-lg border border-b-0 transition-colors whitespace-nowrap"
-                :class="s.skill_name === activeSkill
-                  ? 'bg-card border-border text-foreground font-medium'
-                  : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'"
-                @click="selectSkill(s.skill_name)"
-              >{{ s.name }}</Button>
+
+          <div class="px-4 py-4">
+            <div class="flex items-center justify-between gap-3 mb-3">
+              <h3 class="text-sm font-medium">{{ t('instanceDetail.skillEditor.skillPromptTitle') }}</h3>
+              <span
+                v-if="skills.length"
+                class="text-xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground"
+              >{{ skills.length }}</span>
             </div>
 
-            <div class="px-4 pb-4">
-              <div v-if="skillLoading" class="flex items-center justify-center py-12">
-                <Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
-              </div>
-              <template v-else>
-                <Textarea
-                  v-model="skillContent"
-                  class="w-full h-80 px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono resize-y scrollbar-compact"
-                  :readonly="!canEdit"
-                  spellcheck="false"
-                />
-                <div class="flex items-center justify-between mt-2">
-                  <p class="text-xs text-muted-foreground">{{ t('instanceDetail.skillEditor.restartHint') }}</p>
-                  <Button variant="unstyled" size="unstyled"
-                    v-if="canEdit"
-                    class="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    :class="skillDirty
-                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : 'border border-border text-muted-foreground'"
-                    :disabled="!skillDirty || skillSaving"
-                    @click="saveSkillContent"
-                  >
-                    <Loader2 v-if="skillSaving" class="w-3.5 h-3.5 animate-spin" />
-                    <Save v-else class="w-3.5 h-3.5" />
-                    {{ t('instanceDetail.skillEditor.save') }}
-                  </Button>
-                </div>
-              </template>
+            <div v-if="!skills.length && !skillLoading" class="py-8 text-center text-sm text-muted-foreground">
+              {{ t('instanceDetail.skillEditor.empty') }}
             </div>
-          </template>
+            <template v-else>
+              <div class="flex gap-1 pt-0 pb-0 overflow-x-auto">
+                <Button variant="unstyled" size="unstyled"
+                  v-for="s in skills"
+                  :key="s.skill_name"
+                  class="px-3 py-1.5 text-xs rounded-t-lg border border-b-0 transition-colors whitespace-nowrap"
+                  :class="s.skill_name === activeSkill
+                    ? 'bg-card border-border text-foreground font-medium'
+                    : 'bg-transparent border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/30'"
+                  @click="selectSkill(s.skill_name)"
+                >{{ s.name }}</Button>
+              </div>
+
+              <div class="pt-0">
+                <div v-if="skillLoading" class="flex items-center justify-center py-12">
+                  <Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+                <template v-else>
+                  <Textarea
+                    v-model="skillContent"
+                    class="w-full h-80 px-3 py-2 rounded-lg border border-border bg-background text-sm font-mono resize-y scrollbar-compact"
+                    :readonly="!canEdit"
+                    spellcheck="false"
+                  />
+                  <div class="flex items-center justify-between mt-2">
+                    <p class="text-xs text-muted-foreground">{{ t('instanceDetail.skillEditor.restartHint') }}</p>
+                    <Button variant="unstyled" size="unstyled"
+                      v-if="canEdit"
+                      class="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      :class="skillDirty
+                        ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        : 'border border-border text-muted-foreground'"
+                      :disabled="!skillDirty || skillSaving"
+                      @click="saveSkillContent"
+                    >
+                      <Loader2 v-if="skillSaving" class="w-3.5 h-3.5 animate-spin" />
+                      <Save v-else class="w-3.5 h-3.5" />
+                      {{ t('instanceDetail.skillEditor.save') }}
+                    </Button>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
 

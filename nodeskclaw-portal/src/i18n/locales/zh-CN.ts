@@ -871,12 +871,17 @@ const zhCN = {
     engineHermesDesc: "面向长期运行 Agent 的通用执行引擎",
     skillEditor: {
       title: "角色与提示词",
+      rolePromptTitle: "基础提示词",
+      skillPromptTitle: "技能提示词",
       save: "保存修改",
       saved: "已保存",
+      roleSaved: "基础提示词已保存",
       saveFailed: "保存失败",
+      roleSaveFailed: "基础提示词保存失败",
       restartHint: "修改后需重启 AI 员工才能生效",
       empty: "暂无技能",
       loadFailed: "加载技能内容失败",
+      roleLoadFailed: "加载基础提示词失败",
     },
   },
   runtimeDefaultCapabilities: {
@@ -1693,6 +1698,13 @@ const zhCN = {
     },
     file: {
       invalid_base64: "文件内容格式错误，请重新上传文件",
+    },
+    managed_files: {
+      resource_not_found: "受控文件资源不存在",
+      unsupported_runtime: "当前运行时不支持该受控文件资源",
+      path_outside_allowed_root: "受控文件路径不在允许目录内",
+      config_parse_failed: "运行时配置无法解析",
+      too_large: "文件内容超过允许大小",
     },
     system: {
       internal_error: "服务器内部错误",

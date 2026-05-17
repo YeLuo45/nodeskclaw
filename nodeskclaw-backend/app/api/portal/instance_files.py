@@ -13,7 +13,11 @@ from app.core.security import get_current_user
 from app.models.instance_member import InstanceRole
 from app.models.user import User
 from app.schemas.common import ApiResponse
-from app.services import enterprise_file_service, instance_member_service
+from app.services import (
+    editable_runtime_file_service,
+    enterprise_file_service,
+    instance_member_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,10 @@ router = APIRouter()
 
 class WriteFileRequest(BaseModel):
     path: str
+    content: str
+
+
+class WriteManagedFileRequest(BaseModel):
     content: str
 
 
@@ -36,6 +44,37 @@ async def list_files(
         instance_id, current_user, InstanceRole.admin, db
     )
     data = await enterprise_file_service.list_files_for_instance(instance_id, path, db)
+    return ApiResponse(data=data)
+
+
+@router.get("/{instance_id}/managed-files/{resource_key}", response_model=ApiResponse)
+async def read_managed_file_content(
+    instance_id: str,
+    resource_key: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await instance_member_service.check_instance_access(
+        instance_id, current_user, InstanceRole.admin, db
+    )
+    data = await editable_runtime_file_service.read_managed_file(instance_id, resource_key, db)
+    return ApiResponse(data=data)
+
+
+@router.put("/{instance_id}/managed-files/{resource_key}", response_model=ApiResponse)
+async def write_managed_file_content(
+    instance_id: str,
+    resource_key: str,
+    body: WriteManagedFileRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await instance_member_service.check_instance_access(
+        instance_id, current_user, InstanceRole.admin, db
+    )
+    data = await editable_runtime_file_service.write_managed_file(
+        instance_id, resource_key, body.content, db
+    )
     return ApiResponse(data=data)
 
 
