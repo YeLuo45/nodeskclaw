@@ -193,6 +193,8 @@ v1 不做以下协议层抽象：
 
 一个 Agent 可以拥有某类设备的 Skill，也可以通过 MCP 调用对应工具，但这不等于它拥有某个设备实例的使用权。
 
+MCP / Tool / Skill 解决“Agent 如何调用能力”；Agent Device 解决“一个会产生真实外部影响的连续设备会话，如何在 Device Context 中被占用、观察、交接、回收和审计”。
+
 真正使用 Agent Device 必须经过设备实例、状态、租约、权限、交接和审计。
 
 Agent 操作 Agent Device 必须同时满足三层前置条件：
