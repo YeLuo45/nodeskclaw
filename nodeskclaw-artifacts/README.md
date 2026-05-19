@@ -18,7 +18,8 @@ nodeskclaw-artifacts/
 │   └── check-update.sh          # 版本检测脚本（查询 npm 最新稳定版、自动更新 Dockerfile）
 ├── hermes-image/                # Hermes 员工引擎镜像
 │   ├── Dockerfile               # Base 镜像: python:3.12-slim + 官方 Hermes release 构建
-│   └── docker-entrypoint.sh     # 容器入口脚本（启动 Hermes gateway API server + tunnel bridge）
+│   ├── docker-entrypoint.sh     # 容器入口脚本（启动 Hermes gateway API server + tunnel bridge）
+│   └── python-constraints.txt   # Python 依赖约束
 ├── ingress-controller/          # Nginx Ingress Controller 部署清单
 │   ├── deploy.yaml              # 完整 K8s 资源（Namespace、RBAC、Deployment、Service）
 │   ├── tls-secret.yaml          # 通配符 TLS 证书 Secret 模板
@@ -73,7 +74,7 @@ cd nodeskclaw-artifacts
 
 ### 安全层镜像构建
 
-每个 Runtime 支持 `--with-security` 模式，在 base 镜像基础上追加安全层：
+OpenClaw 支持 `--with-security` 模式，在 base 镜像基础上追加安全层：
 
 ```bash
 cd nodeskclaw-artifacts
@@ -100,12 +101,11 @@ cd nodeskclaw-artifacts
 
 ### 版本自动检测
 
-项目配置了 GitHub Actions 定时工作流（`.github/workflows/check-runtime-updates.yml`），每天自动检查三个工作引擎的最新版本：
+项目配置了 GitHub Actions 定时工作流（`.github/workflows/check-runtime-updates.yml`），每天自动检查 OpenClaw 的最新版本：
 
 | Runtime | 包来源 | 版本检查方式 |
 |---------|--------|-------------|
 | OpenClaw | npm `openclaw` | `npm view` 过滤 `YYYY.M.DD` 格式稳定版 |
-| Hermes | GitHub `NousResearch/hermes-agent` release | 读取最新 release tag |
 
 发现新版本时自动创建对应 PR，人工审核后合并。
 

@@ -195,7 +195,7 @@ PVC empty?
 
 ### Manual Update Check
 
-Each engine directory contains a `check-update.sh` script:
+OpenClaw provides a `check-update.sh` script:
 
 ```bash
 # Check for new versions
@@ -210,14 +210,14 @@ Version detection logic per engine:
 | Engine | Source | Stable Version Filter |
 |--------|--------|-----------------------|
 | OpenClaw | `npm view openclaw versions` | `YYYY.M.DD` format, excludes `-beta`, `-rc` suffixes |
-| Hermes | GitHub Releases API | Latest release tag |
+| Hermes | GitHub `NousResearch/hermes-agent` release | Latest release tag |
 
 ### Automated Version Detection (GitHub Actions)
 
 `.github/workflows/check-runtime-updates.yml` defines a scheduled workflow:
 
 - **Schedule**: Daily at UTC 08:00 (16:00 Beijing Time)
-- **Behavior**: Three engines run as independent parallel jobs
+- **Behavior**: Checks OpenClaw against npm stable versions
 - **On new version**: Auto-updates Dockerfile version ARGs and creates a PR
 - **After PR merge**: Manually run `./build.sh` to build and push
 
@@ -293,8 +293,7 @@ nodeskclaw-artifacts/
 └── hermes-image/
     ├── Dockerfile                   # Base: official Hermes release build
     ├── docker-entrypoint.sh
-    ├── check-update.sh             # PyPI version detection
-    └── README.md
+    └── python-constraints.txt       # Python dependency constraints
 ```
 
 ---

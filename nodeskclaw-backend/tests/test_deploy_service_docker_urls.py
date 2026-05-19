@@ -1,9 +1,12 @@
 import pytest
 
+from app.core.exceptions import BadRequestError
+from app.schemas.deploy import DeployRequest
 from app.services import deploy_service
 from app.services.deploy_service import (
     DEPLOY_STEPS_BASE,
     _DeployContext,
+    _require_supported_runtime,
     _rewrite_docker_callback_url,
     _should_sync_runtime_llm_config,
 )
@@ -31,6 +34,39 @@ def test_should_sync_runtime_llm_config_uses_hermes_org_defaults() -> None:
 
 def test_should_sync_runtime_llm_config_skips_unsupported_runtime() -> None:
     assert _should_sync_runtime_llm_config("unknown_runtime", True, ["openai"]) is False
+
+
+def test_require_supported_runtime_allows_registered_runtime() -> None:
+    _require_supported_runtime("openclaw")
+    _require_supported_runtime("hermes")
+
+
+def test_require_supported_runtime_rejects_removed_nanobot_runtime() -> None:
+    with pytest.raises(BadRequestError) as exc_info:
+        _require_supported_runtime("nanobot")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.message_key == "errors.validation.invalid_runtime"
+    assert "nanobot" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_precheck_rejects_removed_nanobot_runtime_before_db_access() -> None:
+    class FailingDb:
+        async def execute(self, *_args, **_kwargs):
+            raise AssertionError("db should not be used")
+
+    req = DeployRequest(
+        cluster_id="cluster-1",
+        name="demo",
+        runtime="nanobot",
+        image_version="v0.1.4",
+    )
+
+    with pytest.raises(BadRequestError) as exc_info:
+        await deploy_service.precheck(req, FailingDb())
+
+    assert exc_info.value.message_key == "errors.validation.invalid_runtime"
 
 
 def _deploy_context(*, should_sync_runtime_llm_config: bool) -> _DeployContext:
