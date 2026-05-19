@@ -94,6 +94,14 @@ class RuntimeRegistry:
 RUNTIME_REGISTRY = RuntimeRegistry()
 
 
+def runtime_supports_capability(runtime_id: str | None, capability: str) -> bool:
+    runtime = runtime_id or "openclaw"
+    spec = RUNTIME_REGISTRY.get(runtime)
+    if spec is None:
+        return False
+    return spec.capability_map().get(capability, False)
+
+
 def _validate_runtime_spec(spec: RuntimeSpec) -> None:
     required_string_fields = (
         "config_rel_path",
@@ -129,7 +137,7 @@ def _register_builtins() -> None:
         scripts_dir_rel=".deskclaw/tools",
     )
     _hermes_gene_adapter = HermesGeneInstallAdapter()
-    _noop_gene_adapter = NoopGeneInstallAdapter()
+    _noop_gene_adapter = NoopGeneInstallAdapter(runtime_id="nanobot")
 
     RUNTIME_REGISTRY.register(RuntimeSpec(
         runtime_id="openclaw",

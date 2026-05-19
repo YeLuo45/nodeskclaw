@@ -7,10 +7,11 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AppException, BadRequestError
+from app.core.exceptions import AppException, BadRequestError, UnsupportedCapabilityError
 from app.models.instance import Instance
 from app.services.nfs_mount import remote_fs
 from app.services.runtime.config_adapter import get_config_adapter
+from app.services.runtime.registries.runtime_registry import runtime_supports_capability
 from app.services.unified_channel_schema import (
     UNIFIED_CHANNEL_REGISTRY,
     get_legacy_channel_schemas,
@@ -416,20 +417,25 @@ async def write_channel_configs(
 
 # ── Custom Channel Deployment ─────────────────────────────
 
-def _assert_openclaw_runtime(instance: Instance) -> None:
+def _require_runtime_capability(
+    instance: Instance,
+    capability: str,
+    operation: str,
+) -> None:
     runtime = instance.runtime or "openclaw"
-    if runtime != "openclaw":
-        raise BadRequestError(
-            message=f"此操作仅支持 OpenClaw 引擎，当前引擎为 {runtime}",
-            message_key="errors.channel.openclaw_only",
+    if not runtime_supports_capability(runtime, capability):
+        raise UnsupportedCapabilityError(
+            runtime_id=runtime,
+            capability=capability,
+            operation=operation,
         )
 
 
 async def deploy_repo_channel(
     instance: Instance, db: AsyncSession, channel_id: str,
 ) -> dict:
-    """Deploy a repo-based channel plugin to the instance Pod (OpenClaw only)."""
-    _assert_openclaw_runtime(instance)
+    """Deploy a repo-based channel plugin to the instance Pod."""
+    _require_runtime_capability(instance, "repo_channel_sync", "channel.deploy_repo_plugin")
     plugin_info = REPO_CHANNEL_PLUGINS.get(channel_id)
     if not plugin_info:
         raise BadRequestError(
@@ -485,8 +491,8 @@ async def deploy_repo_channel(
 async def install_npm_channel(
     instance: Instance, db: AsyncSession, package_name: str,
 ) -> dict:
-    """Install a third-party channel plugin via openclaw CLI in the Pod (OpenClaw only)."""
-    _assert_openclaw_runtime(instance)
+    """Install a third-party channel plugin via runtime tooling in the Pod."""
+    _require_runtime_capability(instance, "npm_channel_install", "channel.install_npm_plugin")
     if not package_name or not package_name.strip():
         raise BadRequestError(
             message="npm 包名不能为空",
@@ -526,11 +532,11 @@ async def upload_channel_plugin(
     plugin_files: dict[str, str],
     plugin_id: str,
 ) -> dict:
-    """Deploy uploaded channel plugin files to the instance Pod (OpenClaw only).
+    """Deploy uploaded channel plugin files to the instance Pod.
 
     plugin_files: dict mapping relative paths to file contents (text).
     """
-    _assert_openclaw_runtime(instance)
+    _require_runtime_capability(instance, "upload_channel_plugin", "channel.upload_plugin")
     if not plugin_id:
         raise BadRequestError(
             message="插件 ID 不能为空",

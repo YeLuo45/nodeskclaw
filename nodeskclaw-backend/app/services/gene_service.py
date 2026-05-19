@@ -14,7 +14,13 @@ from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_nodeskclaw_webhook_base_url, settings
-from app.core.exceptions import AppException, BadRequestError, ConflictError, NotFoundError
+from app.core.exceptions import (
+    AppException,
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    UnsupportedCapabilityError,
+)
 from app.models.base import not_deleted
 from app.models.corridor import HumanHex
 from app.models.gene import (
@@ -1421,19 +1427,52 @@ async def _send_learning_task(
 
 async def _apply_manifest_actions(
     fs: RemoteFS, manifest: dict, adapter: GeneInstallAdapter,
-) -> None:
+) -> list[dict]:
     """Execute engineering actions using the runtime-specific adapter."""
+    warnings: list[dict] = []
     runtime_config = manifest.get("runtime_config") or manifest.get("openclaw_config")
     if runtime_config:
-        await adapter.apply_config(fs, runtime_config)
+        try:
+            await adapter.apply_config(fs, runtime_config)
+        except UnsupportedCapabilityError as e:
+            warnings.append(_runtime_action_warning(e))
+            logger.warning(
+                "Gene runtime config patch is unsupported: runtime=%s capability=%s operation=%s",
+                e.details.get("runtime_id") if e.details else "unknown",
+                e.details.get("capability") if e.details else "runtime_config_patch",
+                e.details.get("operation") if e.details else "gene.apply_config",
+            )
 
     tool_allow = manifest.get("tool_allow")
     if tool_allow and isinstance(tool_allow, list):
-        await adapter.allow_tools(fs, tool_allow)
+        try:
+            await adapter.allow_tools(fs, tool_allow)
+        except UnsupportedCapabilityError as e:
+            warnings.append(_runtime_action_warning(e))
+            logger.warning(
+                "Gene tool allowlist is unsupported: runtime=%s capability=%s operation=%s",
+                e.details.get("runtime_id") if e.details else "unknown",
+                e.details.get("capability") if e.details else "tool_allow",
+                e.details.get("operation") if e.details else "gene.allow_tools",
+            )
 
     scripts = manifest.get("scripts")
     if scripts and isinstance(scripts, (list, dict)):
         await _deploy_gene_scripts(fs, scripts, adapter)
+
+    return warnings
+
+
+def _runtime_action_warning(error: UnsupportedCapabilityError) -> dict:
+    details = error.details or {}
+    return {
+        "code": details.get("code", "UNSUPPORTED_CAPABILITY"),
+        "runtime_id": details.get("runtime_id"),
+        "capability": details.get("capability"),
+        "operation": details.get("operation"),
+        "message_key": error.message_key,
+        "message": error.message,
+    }
 
 
 async def _deploy_gene_scripts(

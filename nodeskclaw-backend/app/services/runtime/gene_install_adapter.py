@@ -14,6 +14,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
+from app.core.exceptions import UnsupportedCapabilityError
+
 if TYPE_CHECKING:
     from app.services.nfs_mount import RemoteFS
 
@@ -23,15 +25,22 @@ logger = logging.getLogger(__name__)
 class GeneInstallAdapter(ABC):
     """Runtime-specific gene installation adapter."""
 
+    runtime_id = "unknown"
+
     @abstractmethod
     async def deploy_skill(
         self, fs: RemoteFS, skill_name: str, content: str, description: str = "",
     ) -> None:
         """Deploy a skill file to the runtime's skill directory."""
 
-    @abstractmethod
     async def allow_tools(self, fs: RemoteFS, tool_names: list[str]) -> None:
-        """Make tools immediately available in the runtime (no-op for runtimes without whitelisting)."""
+        """Make tools immediately available in the runtime."""
+        if tool_names:
+            raise UnsupportedCapabilityError(
+                runtime_id=self.runtime_id,
+                capability="tool_allow",
+                operation="gene.allow_tools",
+            )
 
     @abstractmethod
     async def deploy_scripts(self, fs: RemoteFS, scripts: dict[str, str]) -> None:
@@ -42,9 +51,14 @@ class GeneInstallAdapter(ABC):
             scripts: Mapping of filename -> script content.
         """
 
-    @abstractmethod
     async def apply_config(self, fs: RemoteFS, config_patch: dict) -> None:
         """Apply runtime-specific configuration patches."""
+        if config_patch:
+            raise UnsupportedCapabilityError(
+                runtime_id=self.runtime_id,
+                capability="runtime_config_patch",
+                operation="gene.apply_config",
+            )
 
     @abstractmethod
     async def invalidate_cache(self, fs: RemoteFS, skill_name: str, event: str = "installed") -> None:
