@@ -870,6 +870,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     unreadCount.value = 0
   }
 
+  async function clearAgentRuntimeSession(workspaceId: string, agentId: string) {
+    const res = await api.post(`/workspaces/${workspaceId}/agents/${agentId}/runtime-session/clear`)
+    return res.data.data as {
+      cleared: boolean
+      agent_id: string
+      agent_name: string
+      runtime: string
+    }
+  }
+
   const _typingTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const _streamFilters = new Map<string, AgentThinkingStreamFilter>()
 
@@ -1783,6 +1793,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     sendWorkspaceMessage,
     sendSystemMessage,
     clearChatHistory,
+    clearAgentRuntimeSession,
     connectSSE,
     disconnectSSE,
     sendMessage,

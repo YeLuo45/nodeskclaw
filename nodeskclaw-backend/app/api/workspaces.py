@@ -1474,59 +1474,73 @@ async def clear_workspace_messages(
 
     cleared_count = await msg_service.clear_workspace_messages(db, workspace_id)
 
-    repaired_instances: list[str] = []
-    restart_failures: list[str] = []
-
-    result = await db.execute(
-        sa_select(Instance)
-        .join(
-            WorkspaceAgent,
-            (WorkspaceAgent.instance_id == Instance.id) & (WorkspaceAgent.deleted_at.is_(None)),
-        )
-        .where(
-            WorkspaceAgent.workspace_id == workspace_id,
-            Instance.deleted_at.is_(None),
-            Instance.runtime.in_(["openclaw", "hermes"]),
-        )
-    )
-    instances = list(result.scalars().all())
-
-    if instances:
-        from app.services.llm_config_service import restart_runtime
-        from app.services.nfs_mount import remote_fs
-        from app.services.openclaw_session import clear_main_session
-        from app.services.hermes_session import clear_workspace_session
-
-        for instance in instances:
-            try:
-                async with remote_fs(instance, db) as fs:
-                    if instance.runtime == "hermes":
-                        await clear_workspace_session(fs, workspace_id)
-                    else:
-                        await clear_main_session(fs)
-                repaired_instances.append(instance.id)
-            except Exception:
-                logger.warning("clear_workspace_messages: failed to clear session for %s", instance.id, exc_info=True)
-                restart_failures.append(instance.id)
-                continue
-
-            try:
-                restart_result = await restart_runtime(instance, db)
-                if restart_result.get("status") != "ok":
-                    restart_failures.append(instance.id)
-            except Exception:
-                logger.warning("clear_workspace_messages: failed to restart runtime for %s", instance.id, exc_info=True)
-                restart_failures.append(instance.id)
-
     broadcast_event(workspace_id, "chat:cleared", {
         "cleared_count": cleared_count,
-        "repaired_instances": repaired_instances,
-        "restart_failures": restart_failures,
     })
     return _ok({
         "cleared_count": cleared_count,
-        "repaired_instances": repaired_instances,
-        "restart_failures": restart_failures,
+    })
+
+
+@router.post("/{workspace_id}/agents/{agent_id}/runtime-session/clear")
+async def clear_agent_runtime_session(
+    workspace_id: str,
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(_get_current_user_dep()),
+):
+    await wm_service.check_workspace_access(workspace_id, user, "manage_settings", db)
+
+    row = (await db.execute(
+        sa_select(WorkspaceAgent, Instance)
+        .join(Instance, Instance.id == WorkspaceAgent.instance_id)
+        .where(
+            WorkspaceAgent.workspace_id == workspace_id,
+            WorkspaceAgent.deleted_at.is_(None),
+            Instance.deleted_at.is_(None),
+            (WorkspaceAgent.instance_id == agent_id) | (WorkspaceAgent.id == agent_id),
+        )
+        .limit(1)
+    )).first()
+    if not row:
+        raise _error(404, 40431, "errors.workspace.agent_not_found", "AI 员工不存在")
+
+    agent, instance = row
+    if not instance.runtime:
+        raise _error(400, 40036, "errors.workspace.agent_runtime_missing", "AI 员工缺少运行时配置")
+    if instance.runtime not in {"openclaw", "hermes"}:
+        raise _error(400, 40037, "errors.workspace.agent_runtime_unsupported", "该运行时暂不支持清理本地上下文")
+
+    from app.services.nfs_mount import remote_fs
+
+    cleared = False
+    async with remote_fs(instance, db) as fs:
+        if instance.runtime == "hermes":
+            from app.services.hermes_session import clear_workspace_session
+            cleared = await clear_workspace_session(fs, workspace_id)
+        else:
+            from app.services.openclaw_session import clear_main_session
+            from app.services.openclaw_session import clear_workspace_session
+            cleared = await clear_workspace_session(fs, workspace_id)
+            if not cleared:
+                cleared = await clear_main_session(fs)
+
+    agent_name = agent.display_name or instance.agent_display_name or instance.name
+    logger.info(
+        "clear_agent_runtime_session: workspace=%s user=%s agent=%s instance=%s runtime=%s cleared=%s",
+        workspace_id,
+        getattr(user, "id", None),
+        agent_name,
+        instance.id,
+        instance.runtime,
+        cleared,
+    )
+
+    return _ok({
+        "cleared": bool(cleared),
+        "agent_id": agent.instance_id,
+        "agent_name": agent_name,
+        "runtime": instance.runtime,
     })
 
 

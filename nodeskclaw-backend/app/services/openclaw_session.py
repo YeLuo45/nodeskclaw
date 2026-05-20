@@ -49,6 +49,48 @@ async def invalidate_skill_snapshots(fs: RemoteFS) -> None:
         logger.warning("Failed to invalidate skill snapshots: %s", e)
 
 
+async def clear_workspace_session(fs: RemoteFS, workspace_id: str) -> bool:
+    raw = await fs.read_text(_SESSIONS_REL)
+    if raw is None:
+        return False
+
+    try:
+        parsed = json.loads(raw)
+        store = parsed if isinstance(parsed, dict) else {}
+    except Exception as e:
+        logger.warning("Failed to parse sessions.json while clearing workspace session: %s", e)
+        return False
+
+    session_key = f"workspace:{workspace_id}"
+    matched_keys: list[str] = []
+    session_files: list[str] = []
+    for key, entry in store.items():
+        if not isinstance(entry, dict):
+            continue
+        session_file = entry.get("sessionFile")
+        is_workspace_session = (
+            key == session_key
+            or entry.get("sessionId") == session_key
+            or entry.get("workspaceId") == workspace_id
+        )
+        if is_workspace_session:
+            matched_keys.append(key)
+            if isinstance(session_file, str) and session_file:
+                session_files.append(session_file)
+
+    if not matched_keys:
+        return False
+
+    for key in matched_keys:
+        store.pop(key, None)
+
+    await _write_sessions_json(fs, _SESSIONS_REL, store)
+    for session_file in session_files:
+        rel_path = session_file[len("/root/"):] if session_file.startswith("/root/") else session_file.lstrip("/")
+        await fs.write_text(rel_path, "")
+    return True
+
+
 async def clear_main_session(fs: RemoteFS) -> bool:
     raw = await fs.read_text(_SESSIONS_REL)
     store: dict = {}
