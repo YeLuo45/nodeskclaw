@@ -208,6 +208,19 @@ def main() -> None:
         except Exception:
             return False
 
+    def _update_genome(slug: str, payload: dict) -> bool:
+        """Update an existing genome when the registry exposes slug-based updates."""
+        try:
+            resp = httpx.put(
+                f"{registry_url}/api/v1/genomes/{slug}",
+                json=payload,
+                headers=headers,
+                timeout=10.0,
+            )
+            return resp.status_code < 300
+        except Exception:
+            return False
+
     print("=== Uploading genes ===")
     for fname in GENE_FILES:
         fpath = TEMPLATES_DIR / fname
@@ -280,6 +293,11 @@ def main() -> None:
             if resp.status_code < 300 and body.get("code") == 0:
                 genome_id = body.get("data", {}).get("id", "?")
                 print(f"  OK    {tpl['slug']} -> id={genome_id}")
+                ok += 1
+            elif resp.status_code == 409:
+                updated = _update_genome(tpl["slug"], payload)
+                status = "EXIST+UPDATE" if updated else "EXIST"
+                print(f"  {status}  {tpl['slug']} (already on GeneHub)")
                 ok += 1
             else:
                 msg = body.get("message", resp.text[:120])

@@ -72,5 +72,5 @@ gene_templates/
 | 角色基因 | content_reviewer.json | content-reviewer | 待上传 |
 | 角色基因 | content_distributor.json | content-distributor | 待上传 |
 | 基因组 | genome_content_media_studio.json | content-media-studio | 待上传 |
-| 基因组 | workflow_genome_example.json | content-creation-pipeline | 未上传 |
+| 基因组 | workflow_genome_example.json | content-creation-pipeline | 已上传 |
 | 模板 | workflow_step_template.json | -- | 不入库 |
