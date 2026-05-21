@@ -1,12 +1,18 @@
 from types import SimpleNamespace
 
-from app.core.config import settings
 from app.services.codex_provider import normalize_selected_models
 from app.services.llm_config_service import (
     _build_providers_config,
-    _docker_rewrite_urls,
     _ensure_gateway_config,
 )
+from app.services.runtime.platform_endpoint_resolver import PlatformEndpoints
+
+
+def _endpoints(url: str) -> PlatformEndpoints:
+    return PlatformEndpoints(
+        llm_proxy_base_url=url,
+        agent_api_base_url="http://backend:4510/api/v1",
+    )
 
 
 def test_normalize_selected_models_sets_codex_default():
@@ -15,14 +21,12 @@ def test_normalize_selected_models_sets_codex_default():
     assert selected_models == [{"id": "gpt-5.4", "name": "gpt-5.4"}]
 
 
-def test_build_providers_config_sets_codex_models(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy:18080")
-    monkeypatch.setattr(settings, "LLM_PROXY_URL", "http://llm-proxy:18080")
-
+def test_build_providers_config_sets_codex_models():
     providers = _build_providers_config(
         [SimpleNamespace(provider="codex", key_source="personal", selected_models=None)],
         "proxy-token",
         {},
+        platform_endpoints=_endpoints("http://llm-proxy:18080"),
     )
 
     assert providers["codex"]["models"] == [{"id": "gpt-5.4", "name": "gpt-5.4"}]
@@ -42,38 +46,48 @@ def test_ensure_gateway_config_sets_local_mode():
     assert config["gateway"]["controlUi"]["dangerouslyDisableDeviceAuth"] is True
 
 
-def test_docker_rewrite_urls_uses_external_proxy_url(monkeypatch):
-    monkeypatch.setattr(settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy:8080")
-    monkeypatch.setattr(settings, "LLM_PROXY_URL", "http://localhost:18080")
+def test_build_providers_config_uses_resolved_docker_proxy_url():
+    providers = _build_providers_config(
+        [
+            SimpleNamespace(
+                provider="ollama",
+                key_source="org",
+                selected_models=[{"id": "qwen3.6:35b", "name": "qwen3.6:35b"}],
+                base_url=None,
+                api_type="openai-completions",
+            )
+        ],
+        "wp-token",
+        {},
+        org_keys={"ollama": SimpleNamespace(api_type="openai-completions")},
+        platform_endpoints=_endpoints("http://host.docker.internal:4511"),
+        compute_provider="docker",
+    )
 
-    providers = {
-        "codex": {
-            "baseUrl": "http://llm-proxy:8080/codex/v1",
-            "apiKey": "proxy-token",
-        }
-    }
-
-    rewritten = _docker_rewrite_urls(providers)
-
-    assert rewritten["codex"]["baseUrl"] == "http://host.docker.internal:18080/codex/v1"
+    assert providers["ollama"]["baseUrl"] == "http://host.docker.internal:4511/ollama/v1"
 
 
-def test_docker_rewrite_urls_custom_provider(monkeypatch):
-    """Custom providers (e.g. Ollama) routed through proxy should also be
-    rewritten to host.docker.internal so standalone instance containers can
-    reach the proxy. Regression test for #228."""
-    monkeypatch.setattr(settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy:8080")
-    monkeypatch.setattr(settings, "LLM_PROXY_URL", "http://localhost:4511")
+def test_build_providers_config_rewrites_docker_personal_localhost():
+    providers = _build_providers_config(
+        [
+            SimpleNamespace(
+                provider="personal-openai",
+                key_source="personal",
+                selected_models=[{"id": "gpt-4.1", "name": "gpt-4.1"}],
+                base_url="http://localhost:11434/v1",
+                api_type="openai-completions",
+            )
+        ],
+        "wp-token",
+        {
+            "personal-openai": SimpleNamespace(
+                api_key="personal-key",
+                base_url="http://localhost:11434/v1",
+                api_type="openai-completions",
+            )
+        },
+        platform_endpoints=_endpoints("http://host.docker.internal:4511"),
+        compute_provider="docker",
+    )
 
-    providers = {
-        "ollama": {
-            "baseUrl": "http://llm-proxy:8080/ollama/v1",
-            "apiKey": "wp-token",
-            "api": "openai-completions",
-            "models": [{"id": "qwen3.6:35b", "name": "qwen3.6:35b"}],
-        }
-    }
-
-    rewritten = _docker_rewrite_urls(providers)
-
-    assert rewritten["ollama"]["baseUrl"] == "http://host.docker.internal:4511/ollama/v1"
+    assert providers["personal-openai"]["baseUrl"] == "http://host.docker.internal:11434/v1"

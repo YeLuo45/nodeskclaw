@@ -6,11 +6,10 @@ import asyncio
 import hashlib
 import json
 import logging
-import re
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
-from urllib.parse import urlparse as _urlparse
+import re
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +28,12 @@ from app.services.k8s.client_manager import k8s_manager
 from app.services.k8s.k8s_client import K8sClient
 from app.services.nfs_mount import NFSMountError, RemoteFS, remote_fs
 from app.services.runtime.config_adapter import get_config_adapter
+from app.services.runtime.platform_endpoint_resolver import (
+    PlatformEndpointConfigError,
+    PlatformEndpoints,
+    resolve_platform_endpoints,
+    resolve_runtime_url,
+)
 from app.utils.jsonc import ensure_exec_security, strip_jsonc
 
 logger = logging.getLogger(__name__)
@@ -73,13 +78,33 @@ def _k8s_name(instance: Instance) -> str:
     return instance.slug or instance.name
 
 
+def _resolve_platform_endpoints_for_instance(
+    instance: Instance,
+    cluster: Cluster | None = None,
+) -> PlatformEndpoints:
+    return resolve_platform_endpoints(
+        compute_provider=instance.compute_provider,
+        runtime=instance.runtime,
+        instance_namespace=instance.namespace,
+        cluster_proxy_endpoint=(cluster.proxy_endpoint if cluster else None),
+        platform_namespace=settings.PLATFORM_NAMESPACE,
+        settings=settings,
+    )
+
+
+async def _fetch_instance_cluster(instance: Instance, db: AsyncSession) -> Cluster | None:
+    result = await db.execute(select(Cluster).where(Cluster.id == instance.cluster_id, not_deleted(Cluster)))
+    return result.scalar_one_or_none()
+
+
 def _build_providers_config(
     configs: list,
     wp_api_key: str,
     user_keys: dict[str, UserLlmKey],
     *,
     org_keys: dict[str, OrgModelProvider] | None = None,
-    use_external_proxy: bool = False,
+    platform_endpoints: PlatformEndpoints,
+    compute_provider: str | None = None,
 ) -> dict:
     """Build the models.providers section for openclaw.json.
 
@@ -88,10 +113,7 @@ def _build_providers_config(
     Optionally reads .base_url / .api_type from config objects directly.
     """
     org_keys = org_keys or {}
-    if use_external_proxy:
-        proxy_url = (settings.LLM_PROXY_URL or "").rstrip("/")
-    else:
-        proxy_url = (settings.LLM_PROXY_INTERNAL_URL or settings.LLM_PROXY_URL or "").rstrip("/")
+    proxy_url = platform_endpoints.llm_proxy_base_url.rstrip("/")
     providers: dict = {}
     for cfg in configs:
         provider = cfg.provider
@@ -108,8 +130,11 @@ def _build_providers_config(
             if not uk:
                 logger.warning("个人 Key 缺失，跳过 provider=%s", provider)
                 continue
+            base_url = cfg_base_url or uk.base_url or PROVIDER_BASE_URLS.get(provider, "")
+            if compute_provider:
+                base_url = _resolve_direct_runtime_url(base_url, compute_provider=compute_provider)
             entry: dict = {
-                "baseUrl": cfg_base_url or uk.base_url or PROVIDER_BASE_URLS.get(provider, ""),
+                "baseUrl": base_url,
                 "apiKey": uk.api_key,
             }
         else:
@@ -134,27 +159,14 @@ def _build_providers_config(
     return providers
 
 
-def _docker_rewrite_urls(providers: dict) -> dict:
-    """Docker 实例使用宿主机可达地址，避免依赖主 compose 网络内的服务名。"""
-    for _provider_id, entry in providers.items():
-        base_url = entry.get("baseUrl", "")
-        if base_url:
-            entry["baseUrl"] = _docker_rewrite_proxy_url(base_url)
-    return providers
-
-
-def _docker_rewrite_proxy_url(url: str) -> str:
-    proxy_internal_url = (settings.LLM_PROXY_INTERNAL_URL or "").rstrip("/")
-    proxy_external_url = (settings.LLM_PROXY_URL or "").rstrip("/")
-    if proxy_internal_url and proxy_external_url and url.startswith(proxy_internal_url):
-        url = f"{proxy_external_url}{url[len(proxy_internal_url):]}"
-    return _docker_rewrite_url(url)
-
-
-def _resolve_proxy_url(*, use_external_proxy: bool) -> str:
-    if use_external_proxy:
-        return (settings.LLM_PROXY_URL or "").rstrip("/")
-    return (settings.LLM_PROXY_INTERNAL_URL or settings.LLM_PROXY_URL or "").rstrip("/")
+def _resolve_direct_runtime_url(url: str, *, compute_provider: str) -> str:
+    return resolve_runtime_url(
+        url,
+        compute_provider=compute_provider,
+        platform_namespace=settings.PLATFORM_NAMESPACE,
+        label="Provider base_url",
+        optional=True,
+    ) or ""
 
 
 def _to_openclaw_models(selected: list[dict]) -> list[dict]:
@@ -308,13 +320,13 @@ async def _build_hermes_provider_payload(
     wp_api_key: str,
     user_keys: dict[str, UserLlmKey],
     org_keys: dict[str, OrgModelProvider],
-    use_external_proxy: bool,
+    platform_endpoints: PlatformEndpoints,
     compute_provider: str | None = None,
 ) -> tuple[list[dict], dict[str, str], dict | None]:
     providers: list[dict] = []
     env_updates: dict[str, str] = {}
     primary: dict | None = None
-    proxy_url = _resolve_proxy_url(use_external_proxy=use_external_proxy)
+    proxy_url = platform_endpoints.llm_proxy_base_url.rstrip("/")
 
     for cfg in configs:
         cfg_api_type = getattr(cfg, "api_type", None)
@@ -326,6 +338,8 @@ async def _build_hermes_provider_payload(
                 user_keys=user_keys,
                 org_keys=org_keys,
             )
+            if compute_provider:
+                base_url = _resolve_direct_runtime_url(base_url, compute_provider=compute_provider)
             env_key = _provider_env_key(cfg.provider)
         else:
             assert proxy_url, "LLM_PROXY_URL must be set (checked at startup)"
@@ -333,9 +347,6 @@ async def _build_hermes_provider_payload(
             base_url = f"{proxy_url}/{cfg.provider}" if skip_v1 else f"{proxy_url}/{cfg.provider}/v1"
             api_key = wp_api_key
             env_key = HERMES_WP_API_KEY_ENV
-
-        if compute_provider == "docker":
-            base_url = _docker_rewrite_proxy_url(base_url)
 
         provider_name = _hermes_custom_provider_name(cfg.provider)
         selected_models = (
@@ -376,7 +387,7 @@ async def _write_hermes_runtime_config(
     wp_api_key: str,
     user_keys: dict[str, UserLlmKey],
     org_keys: dict[str, OrgModelProvider],
-    use_external_proxy: bool,
+    platform_endpoints: PlatformEndpoints,
     restart_runtime_after_write: bool,
 ) -> None:
     providers, env_updates, primary = await _build_hermes_provider_payload(
@@ -384,7 +395,7 @@ async def _write_hermes_runtime_config(
         wp_api_key=wp_api_key,
         user_keys=user_keys,
         org_keys=org_keys,
-        use_external_proxy=use_external_proxy,
+        platform_endpoints=platform_endpoints,
         compute_provider=instance.compute_provider,
     )
     if not providers or primary is None:
@@ -567,6 +578,14 @@ async def read_openclaw_providers(
             (settings.LLM_PROXY_URL or "").rstrip("/"),
         ) if h
     ]
+    cluster_result = await db.execute(
+        select(Cluster).where(Cluster.id == instance.cluster_id, not_deleted(Cluster))
+    )
+    cluster = cluster_result.scalar_one_or_none()
+    try:
+        proxy_hosts.append(_resolve_platform_endpoints_for_instance(instance, cluster).llm_proxy_base_url)
+    except PlatformEndpointConfigError as e:
+        logger.warning("读取 openclaw provider 时解析平台端点失败: %s", e)
 
     ipc_result = await db.execute(
         select(InstanceProviderConfig).where(
@@ -764,13 +783,15 @@ async def write_instance_llm_configs(
         select(Cluster).where(Cluster.id == instance.cluster_id, not_deleted(Cluster))
     )
     cluster = cluster_result.scalar_one_or_none()
-    use_external = bool(cluster and cluster.proxy_endpoint)
+    platform_endpoints = _resolve_platform_endpoints_for_instance(instance, cluster)
 
     try:
         if instance.runtime == "openclaw":
             providers = _build_providers_config(
                 configs, wp_api_key, user_keys,
-                org_keys=org_keys, use_external_proxy=use_external,
+                org_keys=org_keys,
+                platform_endpoints=platform_endpoints,
+                compute_provider=instance.compute_provider,
             )
             if configs and not providers:
                 raise AppException(
@@ -778,8 +799,6 @@ async def write_instance_llm_configs(
                     message="未生成任何 LLM Provider 配置，请检查团队 Key / 个人 Key 配置",
                     status_code=500,
                 )
-            if instance.compute_provider == "docker":
-                _docker_rewrite_urls(providers)
 
             async with remote_fs(instance, db) as fs:
                 try:
@@ -812,7 +831,7 @@ async def write_instance_llm_configs(
                 wp_api_key=wp_api_key,
                 user_keys=user_keys,
                 org_keys=org_keys,
-                use_external_proxy=use_external,
+                platform_endpoints=platform_endpoints,
                 restart_runtime_after_write=True,
             )
         else:
@@ -895,11 +914,13 @@ async def sync_openclaw_llm_config(instance: Instance, db: AsyncSession) -> None
         select(Cluster).where(Cluster.id == instance.cluster_id, not_deleted(Cluster))
     )
     cluster = cluster_result.scalar_one_or_none()
-    use_external = bool(cluster and cluster.proxy_endpoint)
+    platform_endpoints = _resolve_platform_endpoints_for_instance(instance, cluster)
 
     providers = _build_providers_config(
         configs, wp_api_key, user_keys,
-        org_keys=org_keys, use_external_proxy=use_external,
+        org_keys=org_keys,
+        platform_endpoints=platform_endpoints,
+        compute_provider=instance.compute_provider,
     )
     if configs and not providers:
         raise AppException(
@@ -907,9 +928,6 @@ async def sync_openclaw_llm_config(instance: Instance, db: AsyncSession) -> None
             message="未生成任何 LLM Provider 配置，请检查团队 Key / 个人 Key 配置",
             status_code=500,
         )
-    if instance.compute_provider == "docker":
-        _docker_rewrite_urls(providers)
-
     async with remote_fs(instance, db) as fs:
         try:
             existing_json = await _read_config_file(fs)
@@ -1019,7 +1037,7 @@ async def sync_hermes_llm_config(
         wp_api_key=instance.wp_api_key or "",
         user_keys=user_keys,
         org_keys=org_keys,
-        use_external_proxy=bool(cluster and cluster.proxy_endpoint),
+        platform_endpoints=_resolve_platform_endpoints_for_instance(instance, cluster),
         restart_runtime_after_write=restart_runtime_after_write,
     )
     logger.info(
@@ -1104,27 +1122,28 @@ async def _deploy_plugin_files(fs: RemoteFS, plugin_source: Path) -> None:
     )
 
 
-def _docker_rewrite_url(url: str) -> str:
-    """Docker 容器内 localhost/127.0.0.1 不可达宿主机，替换为 host.docker.internal。"""
-    return re.sub(
-        r"(https?://|wss?://)(localhost|127\.0\.0\.1)(:\d+)?",
-        r"\1host.docker.internal\3",
-        url,
-    )
-
-
-def _make_account_entry(instance: Instance, workspace_id: str) -> dict:
+def _make_account_entry(
+    instance: Instance,
+    workspace_id: str,
+    platform_endpoints: PlatformEndpoints | None = None,
+) -> dict:
     """Build a single nodeskclaw account entry for a workspace."""
-    api_url = settings.AGENT_API_BASE_URL
-    if instance.compute_provider == "docker":
-        api_url = _docker_rewrite_url(api_url)
-    elif instance.compute_provider == "k8s":
-        parsed = _urlparse(api_url)
-        if parsed.hostname in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
-            raise BadRequestError(
-                message="AGENT_API_BASE_URL 当前为 localhost，K8s 实例无法回连。",
-                message_key="errors.deploy.localhost_not_reachable",
+    try:
+        api_url = (
+            platform_endpoints.agent_api_base_url
+            if platform_endpoints
+            else resolve_runtime_url(
+                settings.AGENT_API_BASE_URL,
+                compute_provider=instance.compute_provider,
+                platform_namespace=settings.PLATFORM_NAMESPACE,
+                label="AGENT_API_BASE_URL",
             )
+        )
+    except PlatformEndpointConfigError as e:
+        raise BadRequestError(
+            message=str(e),
+            message_key="errors.deploy.localhost_not_reachable",
+        ) from e
     _env = json.loads(instance.env_vars or "{}")
     return {
         "enabled": True,
@@ -1139,6 +1158,7 @@ def _inject_channel_config(
     config: dict,
     instance: Instance,
     workspace_id: str,
+    platform_endpoints: PlatformEndpoints | None = None,
 ) -> None:
     """Inject nodeskclaw channel config and plugin load path into openclaw.json.
 
@@ -1147,13 +1167,19 @@ def _inject_channel_config(
     if "channels" not in config:
         config["channels"] = {}
     ch = config["channels"].setdefault("nodeskclaw", {})
-    if settings.TUNNEL_BASE_URL:
-        tunnel_url = settings.TUNNEL_BASE_URL
-        if instance.compute_provider == "docker":
-            tunnel_url = _docker_rewrite_url(tunnel_url)
+    if platform_endpoints and platform_endpoints.tunnel_base_url:
+        ch["tunnelUrl"] = platform_endpoints.tunnel_base_url
+    elif settings.TUNNEL_BASE_URL:
+        tunnel_url = resolve_runtime_url(
+            settings.TUNNEL_BASE_URL,
+            compute_provider=instance.compute_provider,
+            platform_namespace=settings.PLATFORM_NAMESPACE,
+            label="TUNNEL_BASE_URL",
+            optional=True,
+        )
         ch["tunnelUrl"] = tunnel_url
     accounts = ch.setdefault("accounts", {})
-    entry = _make_account_entry(instance, workspace_id)
+    entry = _make_account_entry(instance, workspace_id, platform_endpoints)
     accounts[workspace_id] = entry
     accounts["default"] = entry
 
@@ -1199,6 +1225,10 @@ async def deploy_nodeskclaw_channel_plugin(
     3. Ensure chatCompletions is enabled in gateway config
     """
     plugin_source = _get_plugin_source_dir()
+    platform_endpoints = _resolve_platform_endpoints_for_instance(
+        instance,
+        await _fetch_instance_cluster(instance, db),
+    )
 
     async with remote_fs(instance, db) as fs:
         await _deploy_plugin_files(fs, plugin_source)
@@ -1212,7 +1242,7 @@ async def deploy_nodeskclaw_channel_plugin(
         if existing is None:
             existing = {}
 
-        _inject_channel_config(existing, instance, workspace_id)
+        _inject_channel_config(existing, instance, workspace_id, platform_endpoints)
         _ensure_gateway_config(existing, instance)
         await _write_config_file(fs, existing)
 
@@ -1226,6 +1256,10 @@ async def add_workspace_channel_account(
     instance: Instance, db: AsyncSession, workspace_id: str,
 ) -> None:
     """Add a workspace's account to nodeskclaw channel config without overwriting existing."""
+    platform_endpoints = _resolve_platform_endpoints_for_instance(
+        instance,
+        await _fetch_instance_cluster(instance, db),
+    )
     async with remote_fs(instance, db) as fs:
         try:
             existing = await _read_config_file(fs)
@@ -1237,7 +1271,7 @@ async def add_workspace_channel_account(
 
         ch = existing.setdefault("channels", {}).setdefault("nodeskclaw", {})
         accounts = ch.setdefault("accounts", {})
-        entry = _make_account_entry(instance, workspace_id)
+        entry = _make_account_entry(instance, workspace_id, platform_endpoints)
         accounts[workspace_id] = entry
         accounts["default"] = entry
 
@@ -1898,7 +1932,6 @@ async def repair_channel_account_urls(db: AsyncSession) -> dict:
     )
     instances = list(inst_result.scalars().all())
 
-    new_api_url = settings.AGENT_API_BASE_URL
     repaired = []
     skipped = []
     failed = []
@@ -1908,6 +1941,10 @@ async def repair_channel_account_urls(db: AsyncSession) -> dict:
             skipped.append({"id": inst.id, "name": inst.name, "reason": f"runtime={inst.runtime}"})
             continue
         try:
+            platform_endpoints = _resolve_platform_endpoints_for_instance(
+                inst,
+                await _fetch_instance_cluster(inst, db),
+            )
             ws_result = await db.execute(
                 select(WorkspaceAgent.workspace_id)
                 .where(
@@ -1939,21 +1976,21 @@ async def repair_channel_account_urls(db: AsyncSession) -> dict:
                 changed = False
 
                 for ws_id in workspace_ids:
-                    correct = _make_account_entry(inst, ws_id)
+                    correct = _make_account_entry(inst, ws_id, platform_endpoints)
                     existing = accounts.get(ws_id)
                     if not isinstance(existing, dict) or existing != correct:
                         accounts[ws_id] = correct
                         changed = True
 
-                primary_entry = _make_account_entry(inst, workspace_ids[0])
+                primary_entry = _make_account_entry(inst, workspace_ids[0], platform_endpoints)
                 cur_default = accounts.get("default")
                 if not isinstance(cur_default, dict) or cur_default != primary_entry:
                     accounts["default"] = primary_entry
                     changed = True
 
                 for key, acct in list(accounts.items()):
-                    if isinstance(acct, dict) and acct.get("apiUrl") != new_api_url:
-                        acct["apiUrl"] = new_api_url
+                    if isinstance(acct, dict) and acct.get("apiUrl") != platform_endpoints.agent_api_base_url:
+                        acct["apiUrl"] = platform_endpoints.agent_api_base_url
                         changed = True
 
                 tools_cfg = config.setdefault("tools", {})

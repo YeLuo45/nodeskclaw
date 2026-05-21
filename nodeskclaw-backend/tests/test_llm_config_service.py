@@ -2,6 +2,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.services import llm_config_service
+from app.services.runtime.platform_endpoint_resolver import PlatformEndpoints
+
+
+def _endpoints(url: str = "http://llm-proxy.internal:4100") -> PlatformEndpoints:
+    return PlatformEndpoints(
+        llm_proxy_base_url=url,
+        agent_api_base_url="http://backend:4510/api/v1",
+    )
 
 
 def test_nodeskclaw_tool_names_are_complete() -> None:
@@ -17,7 +25,7 @@ def test_nodeskclaw_tool_names_are_complete() -> None:
     )
 
 
-async def test_build_hermes_provider_payload_uses_named_custom_provider(monkeypatch) -> None:
+async def test_build_hermes_provider_payload_uses_named_custom_provider() -> None:
     configs = [
         SimpleNamespace(
             provider="test-openai",
@@ -36,14 +44,12 @@ async def test_build_hermes_provider_payload_uses_named_custom_provider(monkeypa
         )
     }
 
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy.internal:4100")
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_URL", "https://llm-proxy.example.com")
     providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
         configs,
         wp_api_key="wp-token",
         user_keys={},
         org_keys=org_keys,
-        use_external_proxy=False,
+        platform_endpoints=_endpoints(),
     )
 
     assert providers == [{
@@ -61,7 +67,7 @@ async def test_build_hermes_provider_payload_uses_named_custom_provider(monkeypa
     }
 
 
-async def test_build_hermes_provider_payload_rewrites_docker_org_custom_provider(monkeypatch) -> None:
+async def test_build_hermes_provider_payload_rewrites_docker_org_custom_provider() -> None:
     configs = [
         SimpleNamespace(
             provider="glm",
@@ -80,15 +86,12 @@ async def test_build_hermes_provider_payload_rewrites_docker_org_custom_provider
         )
     }
 
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy:8080")
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_URL", "http://localhost:4511")
-
     providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
         configs,
         wp_api_key="wp-token",
         user_keys={},
         org_keys=org_keys,
-        use_external_proxy=False,
+        platform_endpoints=_endpoints("http://host.docker.internal:4511"),
         compute_provider="docker",
     )
 
@@ -131,7 +134,7 @@ async def test_build_hermes_provider_payload_keeps_personal_provider_direct() ->
         wp_api_key="wp-token",
         user_keys=user_keys,
         org_keys={},
-        use_external_proxy=False,
+        platform_endpoints=_endpoints(),
     )
 
     assert providers == [{
@@ -149,7 +152,7 @@ async def test_build_hermes_provider_payload_keeps_personal_provider_direct() ->
     }
 
 
-async def test_build_hermes_provider_payload_keeps_docker_personal_provider_direct(monkeypatch) -> None:
+async def test_build_hermes_provider_payload_keeps_docker_personal_provider_direct() -> None:
     configs = [
         SimpleNamespace(
             provider="personal-openai",
@@ -168,15 +171,12 @@ async def test_build_hermes_provider_payload_keeps_docker_personal_provider_dire
         )
     }
 
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy:8080")
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_URL", "http://localhost:4511")
-
     providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
         configs,
         wp_api_key="wp-token",
         user_keys=user_keys,
         org_keys={},
-        use_external_proxy=False,
+        platform_endpoints=_endpoints("http://host.docker.internal:4511"),
         compute_provider="docker",
     )
 
@@ -195,7 +195,44 @@ async def test_build_hermes_provider_payload_keeps_docker_personal_provider_dire
     }
 
 
-async def test_build_hermes_provider_payload_uses_org_gemini_allowed_model(monkeypatch) -> None:
+async def test_build_hermes_provider_payload_rewrites_docker_personal_localhost() -> None:
+    configs = [
+        SimpleNamespace(
+            provider="personal-openai",
+            key_source="personal",
+            selected_models=[{"id": "gpt-4.1-mini", "name": "GPT-4.1 mini"}],
+            base_url="http://localhost:11434/v1",
+            api_type="openai-completions",
+        )
+    ]
+    user_keys = {
+        "personal-openai": SimpleNamespace(
+            provider="personal-openai",
+            api_key="personal-secret",
+            base_url="http://localhost:11434/v1",
+            api_type="openai-completions",
+        )
+    }
+
+    providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
+        configs,
+        wp_api_key="wp-token",
+        user_keys=user_keys,
+        org_keys={},
+        platform_endpoints=_endpoints("http://host.docker.internal:4511"),
+        compute_provider="docker",
+    )
+
+    assert providers[0]["base_url"] == "http://host.docker.internal:11434/v1"
+    assert env_updates == {"NODESKCLAW_PERSONAL_OPENAI_API_KEY": "personal-secret"}
+    assert primary == {
+        "provider": "custom:nodeskclaw-personal-openai",
+        "base_url": "http://host.docker.internal:11434/v1",
+        "model": "gpt-4.1-mini",
+    }
+
+
+async def test_build_hermes_provider_payload_uses_org_gemini_allowed_model() -> None:
     configs = [
         SimpleNamespace(
             provider="gemini",
@@ -215,15 +252,12 @@ async def test_build_hermes_provider_payload_uses_org_gemini_allowed_model(monke
         )
     }
 
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy.internal:4100")
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_URL", "https://llm-proxy.example.com")
-
     providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
         configs,
         wp_api_key="wp-token",
         user_keys={},
         org_keys=org_keys,
-        use_external_proxy=False,
+        platform_endpoints=_endpoints(),
     )
 
     assert providers == [{
@@ -241,7 +275,7 @@ async def test_build_hermes_provider_payload_uses_org_gemini_allowed_model(monke
     }
 
 
-async def test_build_hermes_provider_payload_rewrites_docker_gemini_without_v1(monkeypatch) -> None:
+async def test_build_hermes_provider_payload_rewrites_docker_gemini_without_v1() -> None:
     configs = [
         SimpleNamespace(
             provider="gemini",
@@ -261,15 +295,12 @@ async def test_build_hermes_provider_payload_rewrites_docker_gemini_without_v1(m
         )
     }
 
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy:8080")
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_URL", "http://localhost:4511")
-
     providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
         configs,
         wp_api_key="wp-token",
         user_keys={},
         org_keys=org_keys,
-        use_external_proxy=False,
+        platform_endpoints=_endpoints("http://host.docker.internal:4511"),
         compute_provider="docker",
     )
 
@@ -288,7 +319,7 @@ async def test_build_hermes_provider_payload_rewrites_docker_gemini_without_v1(m
     }
 
 
-async def test_build_hermes_provider_payload_routes_personal_gemini_via_proxy(monkeypatch) -> None:
+async def test_build_hermes_provider_payload_routes_personal_gemini_via_proxy() -> None:
     configs = [
         SimpleNamespace(
             provider="gemini",
@@ -307,15 +338,12 @@ async def test_build_hermes_provider_payload_routes_personal_gemini_via_proxy(mo
         )
     }
 
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_INTERNAL_URL", "http://llm-proxy.internal:4100")
-    monkeypatch.setattr(llm_config_service.settings, "LLM_PROXY_URL", "https://llm-proxy.example.com")
-
     providers, env_updates, primary = await llm_config_service._build_hermes_provider_payload(
         configs,
         wp_api_key="wp-token",
         user_keys=user_keys,
         org_keys={},
-        use_external_proxy=False,
+        platform_endpoints=_endpoints(),
     )
 
     assert providers == [{
