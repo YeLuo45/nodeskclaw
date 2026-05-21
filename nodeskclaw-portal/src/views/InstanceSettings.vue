@@ -13,7 +13,7 @@ import { getRuntimeCaps } from '@/utils/runtimeCapabilities'
 import {
   PROVIDERS, PROVIDER_LABELS, PROVIDER_DEFAULT_URLS,
   BUILTIN_PROVIDERS, ALL_KNOWN_PROVIDERS,
-  isCodexProvider, defaultModelForProvider,
+  isCodexProvider, defaultModelForProvider, resolveChatEndpointSuffix,
 } from '@/utils/llmProviders'
 import { useEdition } from '@/composables/useFeature'
 import { Button } from '@/components/ui/button'
@@ -80,6 +80,15 @@ const orgCustomProviders = computed(() =>
 )
 
 const orgKeyLabel = computed(() => isEE.value ? 'Working Plan' : t('llm.teamKey'))
+
+function baseUrlTrailingPath(provider: string, apiType?: string | null): string {
+  return resolveChatEndpointSuffix(provider, apiType)
+}
+
+function baseUrlTrailingPathLabel(provider: string, apiType?: string | null): string {
+  const path = baseUrlTrailingPath(provider, apiType)
+  return path ? t('llm.baseUrlChatEndpointSuffix', { path }) : ''
+}
 
 // ── State ──
 
@@ -688,6 +697,8 @@ watch(() => instanceOrgId.value, (newVal, oldVal) => {
                       v-model="cfg.baseUrl"
                       :placeholder="cfg.isCustom ? t('llm.baseUrlPlaceholder') : t('llm.defaultBaseUrl', { url: stripProtocol(PROVIDER_DEFAULT_URLS[cfg.provider] || '') })"
                       :show-clear="!cfg.isCustom"
+                      :trailing-path="baseUrlTrailingPath(cfg.provider, cfg.apiType)"
+                      :trailing-path-label="baseUrlTrailingPathLabel(cfg.provider, cfg.apiType)"
                       @clear="cfg.baseUrl = ''; cfg.showBaseUrl = false; markDirty()"
                       @input="markDirty"
                     />

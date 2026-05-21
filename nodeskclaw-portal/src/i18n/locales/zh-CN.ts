@@ -1887,6 +1887,7 @@ const zhCN = {
     providerSlugConflict: "不能与内置 Provider 名称相同",
     baseUrl: "Base URL",
     baseUrlPlaceholder: "如 api.deepseek.com/v1",
+    baseUrlChatEndpointSuffix: "聊天请求会自动追加 {path}",
     customBaseUrl: "自定义 Base URL",
     apiType: "API 兼容类型",
     apiTypeOpenai: "OpenAI Compatible",

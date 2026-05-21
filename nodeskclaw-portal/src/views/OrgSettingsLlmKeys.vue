@@ -8,7 +8,7 @@ import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import { resolveApiErrorMessage } from '@/i18n/error'
-import { PROVIDERS, PROVIDER_LABELS, WP_PROVIDERS, ALL_KNOWN_PROVIDERS } from '@/utils/llmProviders'
+import { PROVIDERS, PROVIDER_LABELS, WP_PROVIDERS, ALL_KNOWN_PROVIDERS, resolveChatEndpointSuffix } from '@/utils/llmProviders'
 import { useEdition } from '@/composables/useFeature'
 import ModelSelect from '@/components/shared/ModelSelect.vue'
 import type { ModelItem } from '@/components/shared/ModelSelect.vue'
@@ -93,6 +93,14 @@ const API_TYPE_OPTIONS = [
 function isCustomProvider(providerName: string): boolean {
   return !ALL_KNOWN_PROVIDERS.has(providerName)
 }
+
+const baseUrlTrailingPath = computed(() =>
+  resolveChatEndpointSuffix(dialogProvider.value, form.value.api_type),
+)
+
+const baseUrlTrailingPathLabel = computed(() =>
+  baseUrlTrailingPath.value ? t('llm.baseUrlChatEndpointSuffix', { path: baseUrlTrailingPath.value }) : '',
+)
 
 const customProviders = computed(() =>
   providers.value.filter(p => isCustomProvider(p.provider)),
@@ -687,6 +695,8 @@ onMounted(async () => {
               <BaseUrlInput
                 v-model="form.base_url"
                 :placeholder="isCustomProvider(dialogProvider) ? t('orgSettings.customProviderBaseUrlRequired') : t('orgSettings.llmKeysBaseUrlPlaceholder')"
+                :trailing-path="baseUrlTrailingPath"
+                :trailing-path-label="baseUrlTrailingPathLabel"
               />
               <label v-if="form.base_url" class="flex items-center gap-2 mt-1.5 cursor-pointer">
                 <Checkbox v-model:checked="form.skip_ssl_verify" />

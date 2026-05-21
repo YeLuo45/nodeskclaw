@@ -18,6 +18,7 @@ import {
   PROVIDERS, PROVIDER_LABELS, PROVIDER_DEFAULT_URLS,
   BUILTIN_PROVIDERS, ALL_KNOWN_PROVIDERS,
   isCodexProvider, DEFAULT_CODEX_MODEL, defaultModelForProvider,
+  resolveChatEndpointSuffix,
 } from '@/utils/llmProviders'
 
 const { t } = useI18n()
@@ -198,6 +199,15 @@ const orgCustomProviders = computed(() =>
 )
 
 const orgKeyLabel = computed(() => isEE.value ? 'Working Plan' : t('llm.teamKey'))
+
+function baseUrlTrailingPath(provider: string, apiType?: string | null): string {
+  return resolveChatEndpointSuffix(provider, apiType)
+}
+
+function baseUrlTrailingPathLabel(provider: string, apiType?: string | null): string {
+  const path = baseUrlTrailingPath(provider, apiType)
+  return path ? t('llm.baseUrlChatEndpointSuffix', { path }) : ''
+}
 
 async function handleFetchModels(provider: string, callback: (models: ModelItem[], error?: string) => void) {
   const cfg = llmConfigs.value.find(c => c.provider === provider)
@@ -1173,6 +1183,8 @@ async function handleDeploy() {
                         v-model="cfg.baseUrl"
                         :placeholder="cfg.isCustom ? t('llm.baseUrlPlaceholder') : t('llm.defaultBaseUrl', { url: stripProtocol(PROVIDER_DEFAULT_URLS[cfg.provider] || '') })"
                         :show-clear="!cfg.isCustom"
+                        :trailing-path="baseUrlTrailingPath(cfg.provider, cfg.apiType)"
+                        :trailing-path-label="baseUrlTrailingPathLabel(cfg.provider, cfg.apiType)"
                         @clear="cfg.baseUrl = ''; cfg.showBaseUrl = false"
                       />
                       <label v-if="cfg.baseUrl" class="flex items-center gap-2 mt-1.5 cursor-pointer">

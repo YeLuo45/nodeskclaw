@@ -28,6 +28,22 @@ export const ALL_KNOWN_PROVIDERS: Set<string> = new Set([...PROVIDERS])
 
 export const isCodexProvider = (provider: string) => provider === 'codex'
 
+export function resolveChatEndpointSuffix(provider: string, apiType?: string | null): string {
+  if (provider === 'gemini' || apiType === 'google-generative-ai') return ''
+  if (apiType === 'anthropic-messages' || provider === 'anthropic' || provider === 'minimax-anthropic') {
+    return '/messages'
+  }
+  if (
+    apiType === 'openai-completions' ||
+    provider === 'openai' ||
+    provider === 'openrouter' ||
+    provider === 'minimax-openai'
+  ) {
+    return '/chat/completions'
+  }
+  return ''
+}
+
 // SYNC: 与 nodeskclaw-backend/app/services/codex_provider.py CODEX_MODELS[0] 保持同步
 export const DEFAULT_CODEX_MODEL: ModelItem = { id: 'gpt-5.4', name: 'gpt-5.4' }
 

@@ -18,11 +18,15 @@ const props = withDefaults(
     placeholder?: string
     showClear?: boolean
     inputClass?: string
+    trailingPath?: string
+    trailingPathLabel?: string
   }>(),
   {
     placeholder: '',
     showClear: false,
     inputClass: '',
+    trailingPath: '',
+    trailingPathLabel: '',
   },
 )
 
@@ -132,23 +136,38 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocumentMousedown,
       </Button>
     </div>
 
-    <Input
-      :value="host"
-      type="text"
-      :placeholder="placeholder"
-      :class="[showClear ? 'pr-8' : 'pr-3', inputClass]"
-      class="flex-1 min-w-0 pl-3 py-1.5 border border-border bg-background rounded-r-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary/50"
-      @input="host = ($event.target as HTMLInputElement).value; onHostInput()"
-      @paste="onPaste"
-    />
+    <div class="relative flex min-w-0 flex-1">
+      <Input
+        :value="host"
+        type="text"
+        :placeholder="placeholder"
+        :class="[
+          showClear ? 'pr-8' : 'pr-3',
+          trailingPath ? 'rounded-none border-r-0' : 'rounded-r-md',
+          inputClass,
+        ]"
+        class="flex-1 min-w-0 pl-3 py-1.5 border border-border bg-background text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary/50"
+        @input="host = ($event.target as HTMLInputElement).value; onHostInput()"
+        @paste="onPaste"
+      />
 
-    <Button variant="unstyled" size="unstyled"
-      v-if="showClear"
-      type="button"
-      class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-      @click="onClear"
+      <Button variant="unstyled" size="unstyled"
+        v-if="showClear"
+        type="button"
+        class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+        @click="onClear"
+      >
+        <X class="w-3.5 h-3.5" />
+      </Button>
+    </div>
+
+    <span
+      v-if="trailingPath"
+      class="inline-flex shrink-0 items-center rounded-r-md border border-l-0 border-border bg-muted/50 px-2 py-1.5 text-xs font-mono text-muted-foreground"
+      :title="trailingPathLabel || undefined"
+      :aria-label="trailingPathLabel || undefined"
     >
-      <X class="w-3.5 h-3.5" />
-    </Button>
+      + {{ trailingPath }}
+    </span>
   </div>
 </template>

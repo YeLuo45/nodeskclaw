@@ -1887,6 +1887,7 @@ const enUS = {
     providerSlugConflict: "Cannot use a built-in provider name",
     baseUrl: "Base URL",
     baseUrlPlaceholder: "e.g. api.deepseek.com/v1",
+    baseUrlChatEndpointSuffix: "Chat requests append {path}",
     customBaseUrl: "Custom Base URL",
     apiType: "API Compatibility",
     apiTypeOpenai: "OpenAI Compatible",
