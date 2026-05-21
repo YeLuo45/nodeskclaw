@@ -98,7 +98,63 @@ async def test_clear_workspace_messages_clears_chat_and_all_runtime_context(monk
     assert ("clear_openclaw_workspace", "workspace-1") in calls
     assert ("clear_hermes_workspace", "workspace-1") in calls
     assert calls[-1][0] == "broadcast"
-    assert calls[-1][3]["runtime_context"]["cleared_count"] == 2
+    broadcast_runtime_context = calls[-1][3]["runtime_context"]
+    assert broadcast_runtime_context["cleared_count"] == 2
+    assert broadcast_runtime_context == {
+        "total": 2,
+        "cleared_count": 2,
+        "skipped_count": 0,
+        "failed_count": 0,
+    }
+    assert "results" not in broadcast_runtime_context
+
+
+@pytest.mark.asyncio
+async def test_clear_workspace_messages_redacts_runtime_errors_from_broadcast(monkeypatch):
+    calls: list[tuple] = []
+    instance = SimpleNamespace(
+        id="instance-1",
+        name="broken-agent",
+        agent_display_name="异常员工",
+        runtime="openclaw",
+    )
+
+    async def fake_check(*_args, **_kwargs):
+        return None
+
+    async def fake_clear_messages(_db, _workspace_id):
+        return 1
+
+    def fake_broadcast(workspace_id, event, payload):
+        calls.append(("broadcast", workspace_id, event, payload))
+
+    @asynccontextmanager
+    async def fake_remote_fs(_fs_instance, _db):
+        raise RuntimeError("/root/.openclaw/private-token")
+        yield
+
+    monkeypatch.setattr(workspace_api.wm_service, "check_workspace_access", fake_check)
+    monkeypatch.setattr(workspace_api.msg_service, "clear_workspace_messages", fake_clear_messages)
+    monkeypatch.setattr(workspace_api, "broadcast_event", fake_broadcast)
+    monkeypatch.setattr(nfs_mount, "remote_fs", fake_remote_fs)
+
+    result = await workspace_api.clear_workspace_messages(
+        "workspace-1",
+        db=FakeDb([(SimpleNamespace(), instance)]),
+        user=SimpleNamespace(id="user-1"),
+    )
+
+    api_runtime_context = result["data"]["runtime_context"]
+    broadcast_runtime_context = calls[-1][3]["runtime_context"]
+    assert api_runtime_context["failed_count"] == 1
+    assert api_runtime_context["results"][0]["error"] == "/root/.openclaw/private-token"
+    assert broadcast_runtime_context == {
+        "total": 1,
+        "cleared_count": 0,
+        "skipped_count": 0,
+        "failed_count": 1,
+    }
+    assert "results" not in broadcast_runtime_context
 
 
 @pytest.mark.asyncio

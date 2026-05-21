@@ -1550,9 +1550,15 @@ async def clear_workspace_messages(
         runtime_context["failed_count"],
     )
 
+    runtime_context_summary = {
+        "total": runtime_context["total"],
+        "cleared_count": runtime_context["cleared_count"],
+        "skipped_count": runtime_context["skipped_count"],
+        "failed_count": runtime_context["failed_count"],
+    }
     broadcast_event(workspace_id, "chat:cleared", {
         "cleared_count": cleared_count,
-        "runtime_context": runtime_context,
+        "runtime_context": runtime_context_summary,
     })
     return _ok({
         "cleared_count": cleared_count,
