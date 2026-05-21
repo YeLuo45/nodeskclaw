@@ -12,7 +12,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import { getStatusDisplay } from '@/utils/instanceStatus'
 import { copyToClipboard } from '@/utils/clipboard'
 import { formatDateTime, formatNumber } from '@/utils/localeFormat'
-import { buildEngineInfoMap } from '@/utils/instanceFlow'
+import { buildEngineInfoMap, getEngineInfo } from '@/utils/instanceFlow'
 import { getRuntimeDefaultCapabilities } from '@/utils/runtimeCapabilities'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -69,7 +69,7 @@ interface EngineInfo {
   tags: string[]
 }
 const ENGINE_INFO: Record<string, EngineInfo> = buildEngineInfoMap(t)
-const engineInfo = computed(() => ENGINE_INFO[instance.value?.runtime ?? 'openclaw'] ?? null)
+const engineInfo = computed(() => getEngineInfo(ENGINE_INFO, instance.value?.runtime ?? 'openclaw'))
 const defaultCapabilities = computed(() => getRuntimeDefaultCapabilities(instance.value?.runtime ?? 'openclaw'))
 const loading = ref(true)
 const pageError = ref('')
@@ -507,9 +507,8 @@ function toggleSkillEditor() {
           <div v-if="instance.runtime" class="col-span-2">
             <span class="text-muted-foreground">{{ t('engine.title') }}</span>
             <span class="relative group inline-block ml-2">
-              <span class="text-xs bg-muted px-1.5 py-0.5 rounded cursor-default">{{ engineInfo?.name ?? instance.runtime }}</span>
+              <span class="text-xs bg-muted px-1.5 py-0.5 rounded cursor-default">{{ engineInfo.name }}</span>
               <span
-                v-if="engineInfo"
                 class="invisible group-hover:visible absolute left-0 top-full mt-1.5 z-50 w-56 p-3 rounded-lg border border-border bg-popover text-popover-foreground shadow-lg text-xs"
               >
                 <span class="flex items-center gap-1.5">

@@ -11,7 +11,7 @@ NoDeskClaw runs AI agent instances on **runtime engines**. Each engine ships as 
 | Engine | Base Image | Install Source | Port | Use Case |
 |--------|-----------|---------------|------|----------|
 | **OpenClaw** | `node:22-bookworm-slim` | npm `openclaw` | 18789 | Full-featured AI Agent, TypeScript ecosystem |
-| **Nanobot** | `python:3.13-slim-bookworm` | PyPI `nanobot-ai` | 18790 | Lightweight Python engine |
+| **Hermes** | `python:3.12-slim` | GitHub Release | 8642 | Long-running self-evolving agent |
 
 ### Relation to Platform Components
 
@@ -50,7 +50,7 @@ Each engine supports a Base + Security layered architecture:
 
 - Docker Desktop or Docker Engine (with BuildKit support)
 - Apple Silicon users: the script automatically sets `--platform linux/amd64` (target cluster architecture)
-- npm (OpenClaw version verification), python3 (Nanobot version detection)
+- npm (OpenClaw version verification), python3 (Hermes version detection)
 
 ### Unified Entry Point: `build.sh`
 
@@ -61,12 +61,11 @@ cd nodeskclaw-artifacts
 
 # Auto-detect latest version, build + push
 ./build.sh openclaw
-./build.sh nanobot
+./build.sh hermes
 ./build.sh all                          # All engines
 
 # Specify version
 ./build.sh openclaw --version 2026.3.13
-./build.sh nanobot --version 0.1.4
 
 # Build only, skip push
 ./build.sh openclaw --build-only
@@ -83,7 +82,7 @@ cd nodeskclaw-artifacts
 ```
 1. Version detection (when --version is omitted)
    ├── OpenClaw → npm view openclaw versions
-   └── Nanobot  → PyPI JSON API
+   └── Hermes   → GitHub Releases API
         ↓
 2. Version verification (OpenClaw checks npm registry)
         ↓
@@ -107,9 +106,6 @@ cd nodeskclaw-artifacts
 ./build.sh openclaw --version 2026.3.13 --build-only
 ./build.sh openclaw --with-security --base-tag v2026.3.13 --build-only
 
-# Nanobot: same pattern
-./build.sh nanobot --version 0.1.4 --build-only
-./build.sh nanobot --with-security --base-tag v0.1.4 --build-only
 ```
 
 Security layer tag format: `v{VERSION}-sec` (e.g. `v2026.3.13-sec`).
@@ -139,25 +135,6 @@ Security layer tag format: `v{VERSION}-sec` (e.g. `v2026.3.13-sec`).
 | `IMAGE_VERSION` | Image tag | `v2026.3.13` |
 
 **Security layer:** `Dockerfile.security` simply `FROM base` + COPY `openclaw-security-layer/` into the `extensions/` directory. OpenClaw natively supports auto-loading TypeScript plugins from extensions.
-
-### 3.2 Nanobot
-
-**Dockerfile key steps:**
-
-1. `python:3.13-slim-bookworm` base image
-2. apt install ca-certificates, curl, gettext-base
-3. `pip install nanobot-ai==${VERSION}`
-4. COPY and pip install `nodeskclaw-tunnel-bridge`
-5. COPY config template `nanobot.yaml.template` and entrypoint script
-
-**Build arguments:**
-
-| Argument | Description | Default |
-|----------|-------------|---------|
-| `NANOBOT_VERSION` | PyPI package version | `0.1.4` |
-| `IMAGE_VERSION` | Image tag | `v0.1.4` |
-
-**Security layer:** `Dockerfile.security` FROM base + `pip install nanobot-security-layer/` + replaces CMD with `python -m nanobot_security_layer.startup` (monkey-patches before launching nanobot).
 
 ---
 
@@ -218,7 +195,7 @@ PVC empty?
 
 ### Manual Update Check
 
-Each engine directory contains a `check-update.sh` script:
+OpenClaw provides a `check-update.sh` script:
 
 ```bash
 # Check for new versions
@@ -233,14 +210,14 @@ Version detection logic per engine:
 | Engine | Source | Stable Version Filter |
 |--------|--------|-----------------------|
 | OpenClaw | `npm view openclaw versions` | `YYYY.M.DD` format, excludes `-beta`, `-rc` suffixes |
-| Nanobot | PyPI JSON API | `X.Y.Z` format, excludes pre-releases |
+| Hermes | GitHub `NousResearch/hermes-agent` release | Latest release tag |
 
 ### Automated Version Detection (GitHub Actions)
 
 `.github/workflows/check-runtime-updates.yml` defines a scheduled workflow:
 
 - **Schedule**: Daily at UTC 08:00 (16:00 Beijing Time)
-- **Behavior**: Three engines run as independent parallel jobs
+- **Behavior**: Checks OpenClaw against npm stable versions
 - **On new version**: Auto-updates Dockerfile version ARGs and creates a PR
 - **After PR merge**: Manually run `./build.sh` to build and push
 
@@ -264,7 +241,7 @@ Scheduled trigger → Read Dockerfile current version → Query upstream latest 
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
-| `<engine>` | Engine name | `openclaw` / `nanobot` / `all` |
+| `<engine>` | Engine name | `openclaw` / `hermes` / `all` |
 | `--version <ver>` | Specify version (auto-detect if omitted) | `--version 2026.3.13` |
 | `--build-only` | Build only, skip push | |
 | `--skip-verify` | Skip post-build verification | |
@@ -276,7 +253,7 @@ Scheduled trigger → Read Dockerfile current version → Query upstream latest 
 | Engine | Full Image Name |
 |--------|----------------|
 | OpenClaw | `{REGISTRY_HOST}/{NAMESPACE}/deskclaw-openclaw:{tag}` |
-| Nanobot | `{REGISTRY_HOST}/{NAMESPACE}/deskclaw-nanobot:{tag}` |
+| Hermes | `{REGISTRY_HOST}/{NAMESPACE}/deskclaw-hermes:{tag}` |
 
 Tag format: Base layer `v{version}`, Security layer `v{version}-sec`.
 
@@ -293,9 +270,9 @@ docker run --rm <image> openclaw --version       # OpenClaw version
 docker run --rm <image> cat /root/.openclaw-version  # Version marker
 docker run --rm <image> ls /root/.openclaw/      # Directory structure
 
-# Nanobot
+# Hermes
 docker run --rm <image> python --version
-docker run --rm <image> pip show nanobot-ai      # Package version
+docker run --rm <image> hermes --help            # CLI check
 ```
 
 ---
@@ -313,13 +290,10 @@ nodeskclaw-artifacts/
 │   ├── init-container.sh            # K8s Init Container
 │   ├── openclaw.json.template       # Config template (envsubst)
 │   └── check-update.sh             # npm version detection
-└── nanobot-image/
-    ├── Dockerfile                   # Base: pip install
-    ├── Dockerfile.security          # Security: pip install + CMD wrapper
-    ├── nanobot.yaml.template        # Config template
+└── hermes-image/
+    ├── Dockerfile                   # Base: official Hermes release build
     ├── docker-entrypoint.sh
-    ├── check-update.sh             # PyPI version detection
-    └── README.md
+    └── python-constraints.txt       # Python dependency constraints
 ```
 
 ---

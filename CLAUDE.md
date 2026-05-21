@@ -8,6 +8,12 @@ DeskClaw（曾用名 NoDeskClaw）— DeskClaw 实例可视化管理平台，通
 
 采用 CE（社区版）/ EE（企业版）双版本架构：CE 为本仓库开源部分，EE 在私有 `ee/` 目录。运行时通过 `FeatureGate` 判断版本：优先读取 `NODESKCLAW_EDITION` 环境变量（`ce`/`ee`），未设置时检测 `ee/` 目录是否存在。`./dev.sh ce` 会自动设置此环境变量以确保后端以 CE 模式运行。
 
+## 产品称呼
+
+- 对外发布、群聊公告、Release Note、客户沟通和文档摘要中，首次出现必须称为“DeskClaw 团队版”。
+- 禁止写成“个人版”，也禁止省略“团队版”导致对外产品定位错误。
+- 技术上下文中可使用 DeskClaw、NoDeskClaw、CE、EE 等名称，但不得影响对外称呼的一致性。
+
 ## 项目结构
 
 ```

@@ -109,10 +109,7 @@ async def test_seed_default_registry_configs_upgrades_legacy_hermes_registry(
         == "nodesk-center-cn-beijing.cr.volces.com/public/deskclaw-hermes"
     )
     assert rows["image_registry"].value == DEFAULT_REGISTRY_CONFIGS["image_registry"]
-    assert (
-        rows["image_registry_nanobot"].value
-        == DEFAULT_REGISTRY_CONFIGS["image_registry_nanobot"]
-    )
+    assert "image_registry_nanobot" not in DEFAULT_REGISTRY_CONFIGS
     assert rows["legacy-marker"].value == "keep"
     assert sessions[0].commit_count == 1
 

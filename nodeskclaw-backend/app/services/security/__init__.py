@@ -1,7 +1,7 @@
 """Tool execution security evaluation service.
 
 Centralized security pipeline that evaluates all tool calls from runtime
-security layers (OpenClaw, nanobot) via WebSocket.
+security layers (OpenClaw) via WebSocket.
 """
 
 from .pipeline import SecurityPipeline

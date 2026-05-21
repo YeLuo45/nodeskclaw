@@ -191,13 +191,19 @@ async def discover_available_channels(
     """Discover available channel plugins (runtime-aware).
 
     OpenClaw: Node.js exec scan of plugin directories.
-    NanoBot: return static list from adapter.supported_channels().
+    Other runtimes: return static list from adapter.supported_channels().
 
     After collecting runtime-native channels, augment with UNIFIED_CHANNEL_REGISTRY
     entries to ensure a consistent view across all runtimes.
     """
     runtime = instance.runtime or "openclaw"
-    adapter = get_config_adapter(runtime)
+    try:
+        adapter = get_config_adapter(runtime)
+    except ValueError:
+        raise BadRequestError(
+            message=f"不支持的 runtime: {runtime}",
+            message_key="errors.channel.unsupported_runtime",
+        )
 
     if runtime == "openclaw":
         raw_channels = await _discover_openclaw_channels(instance, db)
@@ -312,7 +318,13 @@ async def read_channel_configs(
 ) -> dict:
     """Read channels section from config file, excluding system channels (runtime-aware)."""
     runtime = instance.runtime or "openclaw"
-    adapter = get_config_adapter(runtime)
+    try:
+        adapter = get_config_adapter(runtime)
+    except ValueError:
+        raise BadRequestError(
+            message=f"不支持的 runtime: {runtime}",
+            message_key="errors.channel.unsupported_runtime",
+        )
 
     async with remote_fs(instance, db) as fs:
         try:
@@ -351,7 +363,13 @@ async def write_channel_configs(
     Preserves system channel configs and other non-channel sections.
     """
     runtime = instance.runtime or "openclaw"
-    adapter = get_config_adapter(runtime)
+    try:
+        adapter = get_config_adapter(runtime)
+    except ValueError:
+        raise BadRequestError(
+            message=f"不支持的 runtime: {runtime}",
+            message_key="errors.channel.unsupported_runtime",
+        )
 
     async with remote_fs(instance, db) as fs:
         try:

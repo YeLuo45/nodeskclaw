@@ -93,11 +93,11 @@ nodeskclaw-backend/
 │   │   ├── summary_job.py        # 自动摘要生成
 │   │   ├── runtime/              # 运行时平台 v2（五层架构）
 │   │   │   ├── registries/       # 六大注册表（NodeType/Transport/Runtime/Compute/ContextBridge/Channel）
-│   │   │   ├── adapters/         # Agent 运行时适配器（OpenClaw/Nanobot）
+│   │   │   ├── adapters/         # Agent 运行时适配器（OpenClaw/Hermes）
 │   │   │   ├── config_adapter.py            # Channel 配置适配器（三引擎 read/write/translate/restart）
 │   │   │   ├── gene_install_adapter.py      # GeneInstallAdapter 抽象接口
 │   │   │   ├── openclaw_gene_install_adapter.py # OpenClaw 基因安装适配器
-│   │   │   ├── noop_gene_install_adapter.py     # NanoBot 空实现
+│   │   │   ├── noop_gene_install_adapter.py     # 无基因支持 runtime 的 fallback 空实现
 │   │   │   ├── context_bridges/  # 上下文注入桥接（ChannelPlugin/SystemPrompt/MCP）
 │   │   │   ├── compute/          # 计算资源提供者（K8s/Docker/Process）
 │   │   │   ├── transport/        # 消息投递适配器（Agent/Channel）
@@ -179,8 +179,7 @@ API 路由同时挂载在两个前缀下：
 | `POST /api/v1/workspaces/maintenance/repair-channel-accounts` | 维护 | 修复所有实例 channel 配置（super_admin） |
 | `POST /api/v1/workspaces/maintenance/refresh-gene-skills` | 维护 | 批量刷新技能基因 SKILL.md（super_admin） |
 | `/api/v1/workspaces/templates` | 工作区模板 | 列表、创建、详情、删除、应用到工作区 |
-| `/api/v1/workspaces/{ws}/blackboard/posts` | 黑板讨论区 | 帖子 CRUD、置顶、已读标记、未读计数 |
-| `/api/v1/workspaces/{ws}/blackboard/posts/{id}/replies` | 黑板讨论区 | 帖子回复 |
+| `/api/v1/workspaces/{ws}/blackboard` | 黑板 | 黑板正文、任务、目标 |
 | `/api/v1/workspaces/{ws}/blackboard/files` | 共享文件 | 共享文件列表、上传、下载、删除、创建目录（S3 或本地存储） |
 | `/api/v1/files/local/{key}` | 文件下载 | 本地存储模式的 HMAC 签名文件下载端点 |
 | `/api/v1/enterprise-files/agents` | 企业空间 | 列出可浏览的 Agent 实例 |
@@ -206,12 +205,11 @@ API 路由同时挂载在两个前缀下：
 | 配置键 | 引擎 | 说明 |
 |--------|------|------|
 | `image_registry` | OpenClaw | 全局默认，向后兼容 |
-| `image_registry_nanobot` | Nanobot | Nanobot 独立仓库 |
 
 - **启动时自动内置默认值**：`seed.py` 中 `_seed_default_registry_configs()` 在每次启动时幂等写入上述三个 key 的默认公共仓库地址（仅在 key 不存在时写入，不覆盖管理员修改）
 - 部署和配置更新时通过 `resolve_image_registry(db, runtime)` 自动解析
 - 未配置引擎专属仓库时回退到全局 `image_registry`
-- `GET /registry/tags?runtime=nanobot` 按引擎查询对应仓库的 Tag 列表
+- `GET /registry/tags?runtime=hermes` 按引擎查询对应仓库的 Tag 列表
 - Settings API 动态支持 `image_registry_{runtime_id}` 键，新增引擎自动生效
 
 ### StorageClass 配置
@@ -673,7 +671,7 @@ Admin 后台权限**仅依赖 AdminMembership**，`is_super_admin` 不作为 Adm
 
 各 runtime 的 tunnel 客户端收到 `no_reply: true` 后：
 - **OpenClaw**：`max_tokens: 1` fire-and-forget，立即返回 `chat.response.done`
-- **NanoBot**：注入消息到 AgentLoop 后丢弃回复
+- **其他 runtime**：注入消息到 AgentLoop 后丢弃回复
 
 无人被 @提及时，`no_reply` 不发送（保持默认行为，所有 agent 正常响应）。
 

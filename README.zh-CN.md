@@ -91,7 +91,7 @@ flowchart LR
     subgraph infra [" 基础设施 "]
         direction TB
         K8s["Kubernetes"]
-        Runtime["OpenClaw / Nanobot"]
+        Runtime["OpenClaw / Hermes"]
         DB["PostgreSQL"]
         LLMs["OpenAI · Anthropic · Gemini · ..."]
     end

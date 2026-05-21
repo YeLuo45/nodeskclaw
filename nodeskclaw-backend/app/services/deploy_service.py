@@ -101,6 +101,17 @@ def _should_sync_runtime_llm_config(
     return False
 
 
+def _require_supported_runtime(runtime: str) -> None:
+    from app.services.runtime.registries.runtime_registry import RUNTIME_REGISTRY
+
+    runtime_id = (runtime or "").strip()
+    if not runtime_id or RUNTIME_REGISTRY.get(runtime_id) is None:
+        raise BadRequestError(
+            message=f"不支持的 runtime: {runtime_id or runtime}",
+            message_key="errors.validation.invalid_runtime",
+        )
+
+
 # 正在运行的部署任务引用（deploy_id -> asyncio.Task）
 _running_tasks: dict[str, asyncio.Task] = {}
 
@@ -306,6 +317,7 @@ DEPLOY_STEPS_BASE = [
 async def precheck(req: DeployRequest, db: AsyncSession) -> PrecheckResult:
     """Run pre-deploy checks."""
     items: list[PrecheckItem] = []
+    _require_supported_runtime(req.runtime)
 
     # Check cluster exists
     result = await db.execute(
@@ -415,6 +427,8 @@ async def deploy_instance(
     同步阶段：创建 Instance + DeployRecord，立即返回 record.id。
     不执行任何 K8s 操作，由调用方用 asyncio.create_task 启动后台管道。
     """
+    _require_supported_runtime(req.runtime)
+
     adapter = get_deploy_adapter()
     effective_cluster_id, org = await adapter.resolve_cluster(
         req.cluster_id, db, org_id,

@@ -130,3 +130,9 @@ cd ee && git status --short               # EE 仓库状态
 - `get_component_registry("admin")` → `$REGISTRY`（私有，EE 专用）
 - `get_component_registry("其他")` → `$PUBLIC_REGISTRY`（公开）或回退 `$REGISTRY`
 - 配置位于 `deploy/.env.local`（不进 git）
+
+## Release Note / 公告称呼规则
+
+- 对外 Release Note、群聊公告和发布摘要中，首次出现必须写成“DeskClaw 团队版 <version>”。
+- 禁止写成“个人版”，也禁止省略“团队版”导致对外产品定位错误。
+- 后文如需简称，必须先完整出现一次“DeskClaw 团队版”。

@@ -38,12 +38,6 @@ export function buildEngineInfoMap(t: Translator): Record<string, EngineInfo> {
       poweredBy: 'OpenClaw',
       tags: [t('engine.defaultTag')],
     },
-    nanobot: {
-      name: t('instanceDetail.engineNanobotName'),
-      description: t('instanceDetail.engineNanobotDesc'),
-      poweredBy: 'Nanobot',
-      tags: [],
-    },
     hermes: {
       name: t('instanceDetail.engineHermesName'),
       description: t('instanceDetail.engineHermesDesc'),
@@ -51,6 +45,10 @@ export function buildEngineInfoMap(t: Translator): Record<string, EngineInfo> {
       tags: [],
     },
   }
+}
+
+export function getEngineInfo(engineMap: Record<string, EngineInfo>, runtime: string): EngineInfo {
+  return engineMap[runtime] ?? { name: runtime, description: '', poweredBy: runtime, tags: [] }
 }
 
 export function buildPortalDeploySteps(t: Translator): string[] {

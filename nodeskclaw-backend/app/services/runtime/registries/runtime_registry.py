@@ -65,7 +65,6 @@ RUNTIME_REGISTRY = RuntimeRegistry()
 
 def _register_builtins() -> None:
     from app.services.runtime.hermes_gene_install_adapter import HermesGeneInstallAdapter
-    from app.services.runtime.noop_gene_install_adapter import NoopGeneInstallAdapter
     from app.services.runtime.openclaw_gene_install_adapter import OpenClawGeneInstallAdapter
 
     _openclaw_gene_adapter = OpenClawGeneInstallAdapter(
@@ -75,7 +74,6 @@ def _register_builtins() -> None:
         scripts_dir_rel=".deskclaw/tools",
     )
     _hermes_gene_adapter = HermesGeneInstallAdapter()
-    _noop_gene_adapter = NoopGeneInstallAdapter()
 
     RUNTIME_REGISTRY.register(RuntimeSpec(
         runtime_id="openclaw",
@@ -91,32 +89,6 @@ def _register_builtins() -> None:
         order=0,
         docker_seed_template_rel="openclaw.json.template",
         backup_dirs=(".openclaw", ".deskclaw/tools"),
-    ))
-    RUNTIME_REGISTRY.register(RuntimeSpec(
-        runtime_id="nanobot",
-        adapter=None,
-        gene_install_adapter=_noop_gene_adapter,
-        description="Nanobot runtime -- ultra-lightweight Python-based agent.",
-        requires_companion=False,
-        display_name="轻量工作引擎",
-        display_description="超轻量，快速部署，适合简单对话场景",
-        display_tags=(),
-        display_powered_by="Nanobot",
-        gateway_port=18790,
-        health_probe_path=None,
-        order=2,
-        image_registry_key="image_registry_nanobot",
-        config_rel_path=".nanobot/config.json",
-        config_format="json",
-        channels_section_key="channels",
-        field_naming="camelCase",
-        supports_channel_plugins=False,
-        data_dir_container_path="/root/.nanobot",
-        skills_dir_rel=".deskclaw/skills",
-        has_web_ui=False,
-        has_init_script=False,
-        available=False,
-        backup_dirs=(".nanobot", ".deskclaw/skills"),
     ))
     RUNTIME_REGISTRY.register(RuntimeSpec(
         runtime_id="hermes",

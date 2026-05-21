@@ -14,6 +14,6 @@
     "akr-decomposer"
   ],
   "config_override": {
-    "description": "Installing this genome gives the agent full workspace management capabilities: read/write blackboard (tasks, objectives, posts), understand topology, monitor performance, submit proposals, discover new genes, manage shared files, and proactively decompose goals into Objectives/Key Results/Tasks via AKR framework."
+    "description": "Installing this genome gives the agent full workspace management capabilities: read/write blackboard content, tasks, and objectives, understand topology, monitor performance, submit proposals, discover new genes, manage shared files, and proactively decompose goals into Objectives/Key Results/Tasks via AKR framework."
   }
 }

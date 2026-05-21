@@ -15,7 +15,7 @@
 ```
 gene_templates/
 ├── README.md
-├── mcp_blackboard_tools.json        # 黑板工具基因（任务/目标/帖子 CRUD + 工作循环）
+├── mcp_blackboard_tools.json        # 黑板工具基因（内容/任务/目标 + 工作循环）
 ├── mcp_topology_awareness.json      # 拓扑感知基因（工位、邻居查询）
 ├── mcp_performance_reader.json      # 效能数据读取基因
 ├── mcp_proposals.json               # 提案/审批基因
@@ -72,5 +72,5 @@ gene_templates/
 | 角色基因 | content_reviewer.json | content-reviewer | 待上传 |
 | 角色基因 | content_distributor.json | content-distributor | 待上传 |
 | 基因组 | genome_content_media_studio.json | content-media-studio | 待上传 |
-| 基因组 | workflow_genome_example.json | content-creation-pipeline | 未上传 |
+| 基因组 | workflow_genome_example.json | content-creation-pipeline | 已上传 |
 | 模板 | workflow_step_template.json | -- | 不入库 |

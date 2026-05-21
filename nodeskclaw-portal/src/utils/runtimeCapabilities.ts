@@ -13,7 +13,6 @@ export interface RuntimeDefaultCapability {
 
 const CAPS: Record<string, RuntimeCapabilities> = {
   openclaw: { genes: true, evolutionLog: true, llmConfig: true, dataRoot: '.openclaw' },
-  nanobot: { genes: false, evolutionLog: false, llmConfig: false, dataRoot: '.nanobot' },
   hermes: { genes: true, evolutionLog: false, llmConfig: true, dataRoot: '.hermes' },
 }
 
@@ -37,8 +36,10 @@ const DEFAULT_CAPABILITIES: Record<string, RuntimeDefaultCapability[]> = {
   ],
 }
 
+const DEFAULT_CAPS: RuntimeCapabilities = { genes: false, evolutionLog: false, llmConfig: false, dataRoot: '' }
+
 export function getRuntimeCaps(runtime: string): RuntimeCapabilities {
-  return CAPS[runtime] ?? CAPS.openclaw
+  return CAPS[runtime] ?? DEFAULT_CAPS
 }
 
 export function getRuntimeDefaultCapabilities(runtime: string): RuntimeDefaultCapability[] {

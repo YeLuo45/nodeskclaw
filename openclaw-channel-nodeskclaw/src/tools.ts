@@ -167,7 +167,7 @@ function createBlackboardTool(cfg: ToolConfig): AnyAgentTool {
   return {
     name: "nodeskclaw_blackboard",
     description:
-      "Workspace blackboard operations: content, tasks, objectives, BBS discussion posts, AND shared files. " +
+      "Workspace blackboard operations: content, tasks, objectives, AND shared files. " +
       "Use upload_file to upload a local file to the blackboard Files tab (visible to all workspace members). " +
       "Use list_files to see existing shared files.",
     parameters: {
@@ -179,8 +179,6 @@ function createBlackboardTool(cfg: ToolConfig): AnyAgentTool {
             "get_blackboard", "update_blackboard", "patch_section",
             "list_tasks", "create_task", "update_task",
             "list_objectives", "create_objective", "update_objective",
-            "list_posts", "create_post", "get_post", "reply_post",
-            "update_post", "delete_post", "pin_post", "unpin_post",
             "upload_file", "list_files",
           ],
           description: "Which blackboard operation to perform. Use upload_file to upload a local file to the shared Files tab.",
@@ -188,15 +186,14 @@ function createBlackboardTool(cfg: ToolConfig): AnyAgentTool {
         local_path: { type: "string", description: "upload_file: local file path to upload to blackboard Files tab." },
         parent_path: { type: "string", description: "upload_file/list_files: parent directory (default /). Use /documents for documents." },
         filename: { type: "string", description: "upload_file: target filename (defaults to basename of local_path)." },
-        title: { type: "string", description: "Task/post/objective title." },
+        title: { type: "string", description: "Task/objective title." },
         description: { type: "string", description: "Task/objective description." },
-        content: { type: "string", description: "Markdown content (update_blackboard, create_post, reply_post, update_post, patch_section)." },
+        content: { type: "string", description: "Markdown content (update_blackboard, patch_section)." },
         section: { type: "string", description: "patch_section: section heading to update." },
         priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "create_task / update_task." },
         assignee_id: { type: "string", description: "create_task / update_task: agent instance ID or display name." },
         estimated_value: { type: "number", description: "create_task: estimated monetary value." },
         task_id: { type: "string", description: "update_task: target task ID." },
-        post_id: { type: "string", description: "get_post / reply_post / update_post / delete_post / pin_post / unpin_post: target post ID." },
         objective_id: { type: "string", description: "update_objective: target objective ID." },
         obj_type: { type: "string", description: "create_objective / update_objective: objective type." },
         parent_id: { type: "string", description: "create_objective / update_objective: parent objective ID." },
@@ -210,7 +207,6 @@ function createBlackboardTool(cfg: ToolConfig): AnyAgentTool {
         token_cost: { type: "number", description: "update_task: tokens consumed for this task." },
         blocker_reason: { type: "string", description: "update_task: reason when status is blocked." },
         filter_status: { type: "string", description: "list_tasks: filter by status (pending/in_progress/done/blocked/failed)." },
-        page: { type: "number", description: "list_posts: page number (default 1)." },
       },
       required: ["action"],
     },
@@ -302,45 +298,6 @@ function createBlackboardTool(cfg: ToolConfig): AnyAgentTool {
             await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/objectives/${p.objective_id}`, "PUT", body),
           );
         }
-        case "list_posts": {
-          const pg = p.page ? `?page=${p.page}` : "";
-          return jsonResult(await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts${pg}`));
-        }
-        case "create_post":
-          return jsonResult(
-            await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts`, "POST", {
-              title: p.title,
-              content: p.content,
-            }),
-          );
-        case "get_post":
-          return jsonResult(await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts/${p.post_id}`));
-        case "reply_post":
-          return jsonResult(
-            await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts/${p.post_id}/replies`, "POST", {
-              content: p.content,
-            }),
-          );
-        case "update_post": {
-          const body: Record<string, unknown> = {};
-          if (p.title !== undefined) body.title = p.title;
-          if (p.content !== undefined) body.content = p.content;
-          return jsonResult(
-            await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts/${p.post_id}`, "PUT", body),
-          );
-        }
-        case "delete_post":
-          return jsonResult(
-            await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts/${p.post_id}`, "DELETE"),
-          );
-        case "pin_post":
-          return jsonResult(
-            await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts/${p.post_id}/pin`, "POST"),
-          );
-        case "unpin_post":
-          return jsonResult(
-            await bbApiFetch(cfg, `/workspaces/${ws}/blackboard/posts/${p.post_id}/pin`, "DELETE"),
-          );
         case "upload_file": {
           const localPath = p.local_path as string;
           if (!localPath) return jsonResult({ error: "local_path is required for upload_file" });

@@ -11,8 +11,6 @@ import SchedulePanel from './SchedulePanel.vue'
 import RoiDashboard from './RoiDashboard.vue'
 import AgentPerformancePanel from './AgentPerformancePanel.vue'
 import TokenUsagePanel from './TokenUsagePanel.vue'
-import PostList from './PostList.vue'
-import PostDetail from './PostDetail.vue'
 import SharedFileBrowser from './SharedFileBrowser.vue'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -30,12 +28,11 @@ const { t } = useI18n()
 const store = useWorkspaceStore()
 const { isEnabled: isPerformanceEnabled } = useFeature('performance_analytics')
 
-type TabKey = 'objectives-tasks' | 'status' | 'notes-perf' | 'posts' | 'files'
+type TabKey = 'objectives-tasks' | 'status' | 'notes-perf' | 'files'
 const activeTab = ref<TabKey>('objectives-tasks')
 
 const tabs: { key: TabKey; labelKey: string }[] = [
   { key: 'objectives-tasks', labelKey: 'blackboard.tabObjectivesTasks' },
-  { key: 'posts', labelKey: 'blackboard.tabPosts' },
   { key: 'files', labelKey: 'blackboard.tabFiles' },
   { key: 'status', labelKey: 'blackboard.tabStatus' },
   { key: 'notes-perf', labelKey: 'blackboard.tabNotesPerf' },
@@ -44,7 +41,6 @@ const tabs: { key: TabKey; labelKey: string }[] = [
 const editing = ref(false)
 const draft = ref('')
 const saving = ref(false)
-const selectedPostId = ref<string | null>(null)
 const taskKanbanRef = ref<InstanceType<typeof TaskKanban> | null>(null)
 const objectivePanelRef = ref<InstanceType<typeof ObjectivePanel> | null>(null)
 const roiDashboardRef = ref<InstanceType<typeof RoiDashboard> | null>(null)
@@ -64,17 +60,8 @@ const members = computed(() => store.members)
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
     editing.value = false
-    selectedPostId.value = null
     activeTab.value = 'objectives-tasks'
-    store.fetchUnreadPostCount(props.workspaceId)
-  } else {
-    store.setPostsTabVisible(false)
   }
-})
-
-watch(activeTab, (tab, oldTab) => {
-  if (tab === 'posts') store.setPostsTabVisible(true)
-  else if (oldTab === 'posts') store.setPostsTabVisible(false)
 })
 
 function enterEdit() {
@@ -145,15 +132,9 @@ const canEditTab = computed(() => activeTab.value === 'notes-perf')
             :class="activeTab === tab.key
               ? 'border-primary text-primary'
               : 'border-transparent text-muted-foreground hover:text-foreground'"
-            @click="activeTab = tab.key; editing = false; selectedPostId = null"
+            @click="activeTab = tab.key; editing = false"
           >
             {{ t(tab.labelKey) }}
-            <span
-              v-if="tab.key === 'posts' && store.unreadPostCount > 0 && activeTab !== 'posts'"
-              class="inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 text-[10px] font-medium leading-none rounded-full bg-primary text-primary-foreground"
-            >
-              {{ store.unreadPostCount > 99 ? '99+' : store.unreadPostCount }}
-            </span>
           </Button>
         </div>
 
@@ -221,20 +202,6 @@ const canEditTab = computed(() => activeTab.value === 'notes-perf')
               />
             </div>
             <div v-else class="prose prose-sm prose-invert max-w-none" v-html="notesHtml" />
-          </template>
-
-          <template v-if="activeTab === 'posts'">
-            <PostDetail
-              v-if="selectedPostId"
-              :workspace-id="workspaceId"
-              :post-id="selectedPostId"
-              @back="selectedPostId = null"
-            />
-            <PostList
-              v-else
-              :workspace-id="workspaceId"
-              @select="selectedPostId = $event"
-            />
           </template>
 
           <template v-if="activeTab === 'files'">

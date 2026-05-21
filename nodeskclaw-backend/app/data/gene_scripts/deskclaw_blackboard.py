@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DeskClaw Blackboard Tool -- manage blackboard content, tasks, objectives, and BBS posts.
+"""DeskClaw Blackboard Tool -- manage blackboard content, tasks, and objectives.
 
 Usage:
   python3 deskclaw_blackboard.py <action> [options]
@@ -16,15 +16,6 @@ Actions:
   list_objectives                                  List OKR objectives
   create_objective --title TITLE [options]          Create an objective
   update_objective --id ID [options]               Update an objective
-
-  list_posts [--page N]                             List BBS posts
-  create_post --title TITLE --content TEXT          Create a BBS post
-  get_post --post-id ID                             Get post details with replies
-  reply_post --post-id ID --content TEXT            Reply to a post
-  update_post --post-id ID [--title T] [--content C]  Edit a post
-  delete_post --post-id ID                          Delete a post
-  pin_post --post-id ID                             Pin a post
-  unpin_post --post-id ID                           Unpin a post
 
 Environment:
   DESKCLAW_API_URL        Backend API base URL
@@ -90,35 +81,6 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--progress", type=float)
     sp.add_argument("--obj-type")
     sp.add_argument("--parent-id")
-
-    sp = sub.add_parser("list_posts", help="List BBS posts")
-    sp.add_argument("--page", type=int, default=1)
-    sp.add_argument("--size", type=int, default=20)
-
-    sp = sub.add_parser("create_post", help="Create a BBS post")
-    sp.add_argument("--title", required=True)
-    sp.add_argument("--content", required=True)
-
-    sp = sub.add_parser("get_post", help="Get post details")
-    sp.add_argument("--post-id", required=True)
-
-    sp = sub.add_parser("reply_post", help="Reply to a post")
-    sp.add_argument("--post-id", required=True)
-    sp.add_argument("--content", required=True)
-
-    sp = sub.add_parser("update_post", help="Edit a post")
-    sp.add_argument("--post-id", required=True)
-    sp.add_argument("--title")
-    sp.add_argument("--content")
-
-    sp = sub.add_parser("delete_post", help="Delete a post")
-    sp.add_argument("--post-id", required=True)
-
-    sp = sub.add_parser("pin_post", help="Pin a post")
-    sp.add_argument("--post-id", required=True)
-
-    sp = sub.add_parser("unpin_post", help="Unpin a post")
-    sp.add_argument("--post-id", required=True)
 
     return p
 
@@ -191,31 +153,6 @@ def main() -> None:
             ("progress", "progress"), ("obj_type", "obj_type"), ("parent_id", "parent_id"),
         ])
         _output(api_call("PUT", f"{bb}/objectives/{args.id}", body))
-
-    elif action == "list_posts":
-        _output(api_call("GET", f"{bb}/posts?page={args.page}&size={args.size}"))
-
-    elif action == "create_post":
-        _output(api_call("POST", f"{bb}/posts", {"title": args.title, "content": args.content}))
-
-    elif action == "get_post":
-        _output(api_call("GET", f"{bb}/posts/{args.post_id}"))
-
-    elif action == "reply_post":
-        _output(api_call("POST", f"{bb}/posts/{args.post_id}/replies", {"content": args.content}))
-
-    elif action == "update_post":
-        body = _optional_fields(args, [("title", "title"), ("content", "content")])
-        _output(api_call("PUT", f"{bb}/posts/{args.post_id}", body))
-
-    elif action == "delete_post":
-        _output(api_call("DELETE", f"{bb}/posts/{args.post_id}"))
-
-    elif action == "pin_post":
-        _output(api_call("POST", f"{bb}/posts/{args.post_id}/pin"))
-
-    elif action == "unpin_post":
-        _output(api_call("DELETE", f"{bb}/posts/{args.post_id}/pin"))
 
 
 if __name__ == "__main__":

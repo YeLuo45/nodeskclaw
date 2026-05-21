@@ -7,5 +7,4 @@ def test_runtime_registry_display_order_and_names():
     assert [(spec.runtime_id, spec.display_name, spec.order) for spec in specs] == [
         ("openclaw", "全能员工引擎", 0),
         ("hermes", "自进化员工引擎", 1),
-        ("nanobot", "轻量工作引擎", 2),
     ]

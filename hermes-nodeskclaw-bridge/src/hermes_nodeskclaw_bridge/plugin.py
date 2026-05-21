@@ -147,67 +147,6 @@ def blackboard_tool(args: dict[str, Any], **kwargs: Any) -> str:
                 body=body,
             )
         )
-    if action == "list_posts":
-        suffix = ""
-        if args.get("page") is not None:
-            suffix = "?" + urllib.parse.urlencode({"page": str(args["page"])})
-        return _json_result(_bb_api_fetch(cfg, f"/workspaces/{ws}/blackboard/posts{suffix}"))
-    if action == "create_post":
-        return _json_result(
-            _bb_api_fetch(
-                cfg,
-                f"/workspaces/{ws}/blackboard/posts",
-                method="POST",
-                body={"title": args.get("title"), "content": args.get("content")},
-            )
-        )
-    if action == "get_post":
-        return _json_result(
-            _bb_api_fetch(cfg, f"/workspaces/{ws}/blackboard/posts/{args.get('post_id')}")
-        )
-    if action == "reply_post":
-        return _json_result(
-            _bb_api_fetch(
-                cfg,
-                f"/workspaces/{ws}/blackboard/posts/{args.get('post_id')}/replies",
-                method="POST",
-                body={"content": args.get("content")},
-            )
-        )
-    if action == "update_post":
-        body = _filtered_body(args, "title", "content")
-        return _json_result(
-            _bb_api_fetch(
-                cfg,
-                f"/workspaces/{ws}/blackboard/posts/{args.get('post_id')}",
-                method="PUT",
-                body=body,
-            )
-        )
-    if action == "delete_post":
-        return _json_result(
-            _bb_api_fetch(
-                cfg,
-                f"/workspaces/{ws}/blackboard/posts/{args.get('post_id')}",
-                method="DELETE",
-            )
-        )
-    if action == "pin_post":
-        return _json_result(
-            _bb_api_fetch(
-                cfg,
-                f"/workspaces/{ws}/blackboard/posts/{args.get('post_id')}/pin",
-                method="POST",
-            )
-        )
-    if action == "unpin_post":
-        return _json_result(
-            _bb_api_fetch(
-                cfg,
-                f"/workspaces/{ws}/blackboard/posts/{args.get('post_id')}/pin",
-                method="DELETE",
-            )
-        )
     return _json_result({"error": f"Unknown action: {action}"})
 
 
@@ -766,7 +705,7 @@ def _resolve_unique_file_path(directory: Path, filename: str) -> Path:
 
 _BLACKBOARD_SCHEMA = {
     "name": "nodeskclaw_blackboard",
-    "description": "Workspace blackboard operations: content, tasks, objectives, and BBS discussion posts.",
+    "description": "Workspace blackboard operations: content, tasks, and objectives.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -782,20 +721,12 @@ _BLACKBOARD_SCHEMA = {
                     "list_objectives",
                     "create_objective",
                     "update_objective",
-                    "list_posts",
-                    "create_post",
-                    "get_post",
-                    "reply_post",
-                    "update_post",
-                    "delete_post",
-                    "pin_post",
-                    "unpin_post",
                 ],
                 "description": "Which blackboard operation to perform.",
             },
-            "title": {"type": "string", "description": "Task/post/objective title."},
+            "title": {"type": "string", "description": "Task/objective title."},
             "description": {"type": "string", "description": "Task/objective description."},
-            "content": {"type": "string", "description": "Markdown content for blackboard and BBS write actions."},
+            "content": {"type": "string", "description": "Markdown content for blackboard write actions."},
             "section": {"type": "string", "description": "patch_section: section heading to update."},
             "priority": {
                 "type": "string",
@@ -805,7 +736,6 @@ _BLACKBOARD_SCHEMA = {
             "assignee_id": {"type": "string", "description": "create_task: assign to agent instance ID."},
             "estimated_value": {"type": "number", "description": "create_task: estimated monetary value."},
             "task_id": {"type": "string", "description": "update_task: target task ID."},
-            "post_id": {"type": "string", "description": "Target post ID for post operations."},
             "objective_id": {"type": "string", "description": "update_objective: target objective ID."},
             "obj_type": {"type": "string", "description": "Objective type."},
             "parent_id": {"type": "string", "description": "Parent objective ID."},
@@ -819,7 +749,6 @@ _BLACKBOARD_SCHEMA = {
             "token_cost": {"type": "number", "description": "update_task: tokens consumed."},
             "blocker_reason": {"type": "string", "description": "update_task: reason when blocked."},
             "filter_status": {"type": "string", "description": "list_tasks: optional status filter."},
-            "page": {"type": "number", "description": "list_posts: page number."},
         },
         "required": ["action"],
     },

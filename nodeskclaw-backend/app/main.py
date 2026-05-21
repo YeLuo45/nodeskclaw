@@ -390,6 +390,7 @@ async def lifespan(app: FastAPI):
                         continue
                     _tpl = _seed_json.loads(_tpl_path.read_text())
                     _slug = _tpl["slug"]
+                    _version = str(_tpl.get("version") or "1.0.0")
 
                     _manifest = _tpl.get("manifest", {})
                     if "scripts" in _manifest and isinstance(_manifest["scripts"], list):
@@ -414,7 +415,7 @@ async def lifespan(app: FastAPI):
                             category=_tpl.get("category"),
                             tags=_seed_json.dumps(_tpl.get("tags", []), ensure_ascii=False),
                             source="official",
-                            version="1.0.0",
+                            version=_version,
                             manifest=_seed_json.dumps(_manifest, ensure_ascii=False),
                             is_published=True,
                             review_status="approved",
@@ -423,7 +424,18 @@ async def lifespan(app: FastAPI):
                         _seeded_genes += 1
                     else:
                         _new_manifest = _seed_json.dumps(_manifest, ensure_ascii=False)
-                        if _existing.manifest != _new_manifest:
+                        _new_tags = _seed_json.dumps(_tpl.get("tags", []), ensure_ascii=False)
+                        if (_existing.manifest != _new_manifest
+                                or _existing.version != _version
+                                or _existing.name != _tpl["name"]
+                                or _existing.description != _tpl.get("description")
+                                or _existing.category != _tpl.get("category")
+                                or _existing.tags != _new_tags):
+                            _existing.name = _tpl["name"]
+                            _existing.description = _tpl.get("description")
+                            _existing.category = _tpl.get("category")
+                            _existing.tags = _new_tags
+                            _existing.version = _version
                             _existing.manifest = _new_manifest
                             _updated_genes += 1
 

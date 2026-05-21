@@ -10,6 +10,12 @@ NoDeskClaw 是 DeskClaw 实例可视化管理系统，通过 Web 界面管理 K8
 | 管理前端 | Vue 3 + Vite + TypeScript + Tailwind CSS + shadcn-vue | EE-only |
 | 用户门户 | Vue 3 + Vite + TypeScript + Tailwind CSS + Three.js | CE + EE |
 
+## 产品称呼
+
+- 对外发布、群聊公告、Release Note、客户沟通和文档摘要中，首次出现必须称为“DeskClaw 团队版”。
+- 禁止写成“个人版”，也禁止省略“团队版”导致对外产品定位错误。
+- 技术上下文中可使用 DeskClaw、NoDeskClaw、CE、EE 等名称，但不得影响对外称呼的一致性。
+
 ## 构建/测试命令
 
 ### 后端（nodeskclaw-backend）

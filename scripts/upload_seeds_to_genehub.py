@@ -34,12 +34,17 @@ GENE_FILES = [
     "meta_gene_self_improve.json",
     "meta_gene_innovation.json",
     "meta_gene_akr_decomposer.json",
+    "content_topic_editor.json",
+    "content_writer.json",
+    "content_reviewer.json",
+    "content_distributor.json",
 ]
 
 GENOME_FILES = [
     "genome_self_management.json",
     "genome_ai_employee_basics.json",
     "workflow_genome_example.json",
+    "genome_content_media_studio.json",
 ]
 
 VALID_CATEGORIES = {
@@ -112,7 +117,7 @@ def build_gene_manifest(tpl: dict) -> dict:
         "short_description": tpl.get("short_description", ""),
         "category": _map_category(tpl.get("category", "")),
         "tags": _map_tags(tpl.get("tags", [])),
-        "version": "1.0.0",
+        "version": str(tpl.get("version") or "1.0.0"),
         "author": {"ref": "", "name": "NoDeskAI", "type": "human"},
         "compatibility": tpl.get("compatibility", inner.get("compatibility", default_compat)),
         "dependencies": [],
@@ -154,7 +159,7 @@ def build_genome_payload(tpl: dict) -> dict:
         "short_description": tpl.get("short_description", ""),
         "category": _map_category(tpl.get("category", "efficiency")),
         "tags": _map_tags(tpl.get("tags", [])) if tpl.get("tags") else ["ability"],
-        "version": "1.0.0",
+        "version": str(tpl.get("version") or "1.0.0"),
         "author": {"ref": "", "name": "NoDeskAI", "type": "organization"},
         "genes": genes,
         "compatibility": tpl.get("compatibility", default_compat),
@@ -196,6 +201,19 @@ def main() -> None:
             resp = httpx.put(
                 f"{registry_url}/api/v1/genes/{slug}",
                 json=body,
+                headers=headers,
+                timeout=10.0,
+            )
+            return resp.status_code < 300
+        except Exception:
+            return False
+
+    def _update_genome(slug: str, payload: dict) -> bool:
+        """Update an existing genome when the registry exposes slug-based updates."""
+        try:
+            resp = httpx.put(
+                f"{registry_url}/api/v1/genomes/{slug}",
+                json=payload,
                 headers=headers,
                 timeout=10.0,
             )
@@ -275,6 +293,11 @@ def main() -> None:
             if resp.status_code < 300 and body.get("code") == 0:
                 genome_id = body.get("data", {}).get("id", "?")
                 print(f"  OK    {tpl['slug']} -> id={genome_id}")
+                ok += 1
+            elif resp.status_code == 409:
+                updated = _update_genome(tpl["slug"], payload)
+                status = "EXIST+UPDATE" if updated else "EXIST"
+                print(f"  {status}  {tpl['slug']} (already on GeneHub)")
                 ok += 1
             else:
                 msg = body.get("message", resp.text[:120])

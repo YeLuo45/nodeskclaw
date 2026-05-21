@@ -16,16 +16,10 @@ nodeskclaw-artifacts/
 │   ├── init-container.sh        # Init Container 脚本（PVC 数据初始化 + 版本升级）
 │   ├── openclaw.json.template   # 配置模板，启动时 envsubst 替换占位符
 │   └── check-update.sh          # 版本检测脚本（查询 npm 最新稳定版、自动更新 Dockerfile）
-├── nanobot-image/               # Nanobot 轻量工作引擎镜像
-│   ├── Dockerfile               # Base 镜像: python:3.13-slim-bookworm + pip install nanobot-ai
-│   ├── Dockerfile.security      # 安全层镜像: FROM base + pip install 安全层 + startup wrapper
-│   ├── nanobot.yaml.template    # Nanobot 配置模板
-│   ├── docker-entrypoint.sh     # 容器入口脚本
-│   ├── check-update.sh          # 版本检测脚本（查询 PyPI 最新稳定版、自动更新 Dockerfile）
-│   └── README.md                # 构建说明
 ├── hermes-image/                # Hermes 员工引擎镜像
 │   ├── Dockerfile               # Base 镜像: python:3.12-slim + 官方 Hermes release 构建
-│   └── docker-entrypoint.sh     # 容器入口脚本（启动 Hermes gateway API server + tunnel bridge）
+│   ├── docker-entrypoint.sh     # 容器入口脚本（启动 Hermes gateway API server + tunnel bridge）
+│   └── python-constraints.txt   # Python 依赖约束
 ├── ingress-controller/          # Nginx Ingress Controller 部署清单
 │   ├── deploy.yaml              # 完整 K8s 资源（Namespace、RBAC、Deployment、Service）
 │   ├── tls-secret.yaml          # 通配符 TLS 证书 Secret 模板
@@ -67,7 +61,6 @@ cd nodeskclaw-artifacts
 
 # 单引擎（自动检测最新版）
 ./build.sh openclaw
-./build.sh nanobot
 ./build.sh hermes
 
 # 指定版本
@@ -81,7 +74,7 @@ cd nodeskclaw-artifacts
 
 ### 安全层镜像构建
 
-每个 Runtime 支持 `--with-security` 模式，在 base 镜像基础上追加安全层：
+OpenClaw 支持 `--with-security` 模式，在 base 镜像基础上追加安全层：
 
 ```bash
 cd nodeskclaw-artifacts
@@ -89,10 +82,6 @@ cd nodeskclaw-artifacts
 # OpenClaw: 先构建 base，再构建安全层
 ./build.sh openclaw --version 2026.3.13 --build-only
 ./build.sh openclaw --with-security --base-tag v2026.3.13 --build-only
-
-# Nanobot
-./build.sh nanobot --version 0.1.4 --build-only
-./build.sh nanobot --with-security --base-tag v0.1.4 --build-only
 ```
 
 安全层镜像 Tag 格式: `v{VERSION}-sec`（如 `v2026.2.26-sec`）。
@@ -112,13 +101,11 @@ cd nodeskclaw-artifacts
 
 ### 版本自动检测
 
-项目配置了 GitHub Actions 定时工作流（`.github/workflows/check-runtime-updates.yml`），每天自动检查三个工作引擎的最新版本：
+项目配置了 GitHub Actions 定时工作流（`.github/workflows/check-runtime-updates.yml`），每天自动检查 OpenClaw 的最新版本：
 
 | Runtime | 包来源 | 版本检查方式 |
 |---------|--------|-------------|
 | OpenClaw | npm `openclaw` | `npm view` 过滤 `YYYY.M.DD` 格式稳定版 |
-| Nanobot | PyPI `nanobot-ai` | PyPI JSON API 过滤 `X.Y.Z` 格式稳定版 |
-| Hermes | GitHub `NousResearch/hermes-agent` release | 读取最新 release tag |
 
 发现新版本时自动创建对应 PR，人工审核后合并。
 

@@ -6,13 +6,12 @@
 #   ./build.sh <engine> --with-security --base-tag <tag> [--build-only]
 #   ./build.sh all [--build-only] [--skip-verify]
 #
-# 省略 --version 时自动检测各引擎最新稳定版（openclaw→npm, nanobot→PyPI）
+# 省略 --version 时自动检测各引擎最新稳定版（openclaw→npm, hermes→GitHub）
 #
 # 示例:
 #   ./build.sh all                                    # 所有引擎最新版，构建并推送
 #   ./build.sh all --build-only                       # 所有引擎最新版，仅构建
 #   ./build.sh openclaw                               # 自动检测最新 OpenClaw
-#   ./build.sh nanobot --version 0.1.4
 #   ./build.sh hermes                                 # 使用 Hermes 官方 release tag
 #   ./build.sh openclaw --with-security --base-tag v2026.3.13
 set -e
@@ -31,15 +30,6 @@ detect_latest_version() {
         if (stable.length > 0) console.log(stable[stable.length - 1]);
       "
       ;;
-    nanobot)
-      curl -sS https://pypi.org/pypi/nanobot-ai/json 2>/dev/null | python3 -c "
-import json, sys, re
-data = json.load(sys.stdin)
-versions = list(data['releases'].keys())
-stable = [v for v in versions if re.match(r'^\d+\.\d+\.\d+$', v)]
-stable.sort(key=lambda v: list(map(int, v.split('.'))))
-print(stable[-1] if stable else '')"
-      ;;
     hermes)
       python3 - <<'PY'
 import json
@@ -57,14 +47,14 @@ PY
 ENGINE="$1"; shift || true
 if [ -z "${ENGINE}" ]; then
   log_error "用法: ./build.sh <engine> [--version <ver>] [--build-only] [--skip-verify]"
-  log_info "可用引擎: openclaw, nanobot, hermes, all"
+  log_info "可用引擎: openclaw, hermes, all"
   exit 1
 fi
 
 # ── all 模式: 依次构建所有引擎 ────────────────────────
 if [ "${ENGINE}" = "all" ]; then
   FAILED=0
-  for e in openclaw nanobot hermes; do
+  for e in openclaw hermes; do
     echo ""
     log_info "==============================="
     log_info "  构建 ${e}"
@@ -132,11 +122,6 @@ else
     log_success "openclaw@${VERSION} 存在"
   fi
 
-  if [ -d "${SCRIPT_DIR}/../nodeskclaw-tunnel-bridge" ] && [ "${ENGINE}" = "nanobot" ]; then
-    cp -r "${SCRIPT_DIR}/../nodeskclaw-tunnel-bridge" "${ENGINE_DIR}/nodeskclaw-tunnel-bridge"
-    trap "rm -rf '${ENGINE_DIR}/nodeskclaw-tunnel-bridge'" EXIT
-  fi
-
   IMAGE_TAG="v${VERSION}"
 
   BUILD_ARG_VERSION="${VERSION}"
@@ -169,10 +154,6 @@ if [ "${SKIP_VERIFY}" = false ] && [ "${WITH_SECURITY}" = false ]; then
       echo "  Node.js: $(docker run --rm --platform linux/amd64 "${REGISTRY}:${IMAGE_TAG}" node --version)"
       echo "  OpenClaw: $(docker run --rm --platform linux/amd64 "${REGISTRY}:${IMAGE_TAG}" openclaw --version 2>/dev/null || echo '(需启动后验证)')"
       echo "  版本标记: $(docker run --rm --platform linux/amd64 "${REGISTRY}:${IMAGE_TAG}" cat /root/.openclaw-version)"
-      ;;
-    nanobot)
-      echo "  Python: $(docker run --rm --platform linux/amd64 "${REGISTRY}:${IMAGE_TAG}" python --version)"
-      echo "  Nanobot: $(docker run --rm --platform linux/amd64 "${REGISTRY}:${IMAGE_TAG}" pip show nanobot-ai 2>/dev/null | grep Version || echo '(需启动后验证)')"
       ;;
     hermes)
       echo "  Python: $(docker run --rm --platform linux/amd64 "${REGISTRY}:${IMAGE_TAG}" python --version)"

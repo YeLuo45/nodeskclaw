@@ -17,8 +17,6 @@ const messages: Record<string, string> = {
   'createInstance.specLargeDesc': 'Heavy work',
   'instanceDetail.engineOpenclawName': 'General Employee Engine',
   'instanceDetail.engineOpenclawDesc': 'Tool-heavy engine',
-  'instanceDetail.engineNanobotName': 'Light Engine',
-  'instanceDetail.engineNanobotDesc': 'Fast lightweight engine',
   'instanceDetail.engineHermesName': 'Self-Evolving Employee Engine',
   'instanceDetail.engineHermesDesc': 'Long-running agent engine',
   'engine.defaultTag': 'Default',

@@ -1,8 +1,8 @@
-"""No-op gene installation adapter for runtimes that don't yet have specific logic.
+"""No-op gene installation adapter for runtimes without gene support.
 
-Used as a fallback for NanoBot and any future runtimes that
-haven't implemented their own GeneInstallAdapter yet. Deploys skills and
-scripts to generic paths without runtime-specific config management.
+Used as a fallback for runtimes that haven't implemented their own
+GeneInstallAdapter. Deploys skills and scripts to generic paths without
+runtime-specific config management.
 """
 
 from __future__ import annotations

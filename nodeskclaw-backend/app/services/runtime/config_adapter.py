@@ -118,71 +118,6 @@ class OpenClawConfigAdapter(RuntimeConfigAdapter):
         return native
 
 
-class NanobotConfigAdapter(RuntimeConfigAdapter):
-
-    _CONFIG_REL = ".nanobot/config.json"
-
-    async def read_config(self, fs: RemoteFS) -> dict | None:
-        raw = await fs.read_text(self._CONFIG_REL)
-        if raw is None:
-            return None
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"nanobot config.json 格式无法解析: {e}") from e
-
-    async def write_config(self, fs: RemoteFS, data: dict) -> None:
-        await fs.write_text(
-            self._CONFIG_REL,
-            json.dumps(data, indent=2, ensure_ascii=False),
-        )
-
-    def extract_channels(self, config: dict) -> dict:
-        return config.get("channels", {})
-
-    def merge_channels(self, config: dict, channels: dict) -> dict:
-        config["channels"] = channels
-        return config
-
-    async def restart(self, instance: Instance, db: AsyncSession) -> dict:
-        return await _restart_container(instance, db)
-
-    def supported_channels(self) -> list[str]:
-        return [
-            "feishu", "telegram", "discord", "slack", "matrix",
-            "whatsapp", "email", "dingtalk", "qq", "wecom", "mochat",
-        ]
-
-    def translate_to_runtime(self, canonical: dict, channel_id: str) -> dict:
-        from app.services.unified_channel_schema import UNIFIED_CHANNEL_REGISTRY
-        defn = UNIFIED_CHANNEL_REGISTRY.get(channel_id)
-        if not defn:
-            return canonical
-        result: dict = {}
-        for field_def in defn.fields:
-            runtime_key = field_def.runtime_key.get("nanobot")
-            if runtime_key and field_def.key in canonical:
-                result[runtime_key] = canonical[field_def.key]
-        for k, v in canonical.items():
-            if not any(f.key == k for f in defn.fields):
-                result[k] = v
-        return result
-
-    def translate_from_runtime(self, native: dict, channel_id: str) -> dict:
-        from app.services.unified_channel_schema import UNIFIED_CHANNEL_REGISTRY
-        defn = UNIFIED_CHANNEL_REGISTRY.get(channel_id)
-        if not defn:
-            return native
-        result: dict = {}
-        reverse_map: dict[str, str] = {}
-        for field_def in defn.fields:
-            runtime_key = field_def.runtime_key.get("nanobot")
-            if runtime_key:
-                reverse_map[runtime_key] = field_def.key
-        for k, v in native.items():
-            result[reverse_map.get(k, k)] = v
-        return result
-
 
 class HermesConfigAdapter(RuntimeConfigAdapter):
 
@@ -397,7 +332,7 @@ class HermesConfigAdapter(RuntimeConfigAdapter):
 
 
 async def _restart_container(instance: Instance, db: AsyncSession) -> dict:
-    """Generic container restart for NanoBot (SIGTERM + wait)."""
+    """Generic container restart via SIGTERM + wait."""
     if instance.compute_provider == "docker":
         from app.services.instance_service import _build_docker_handle, _get_docker_provider
         try:
@@ -446,7 +381,6 @@ async def _restart_container(instance: Instance, db: AsyncSession) -> dict:
 
 _ADAPTERS: dict[str, RuntimeConfigAdapter] = {
     "openclaw": OpenClawConfigAdapter(),
-    "nanobot": NanobotConfigAdapter(),
     "hermes": HermesConfigAdapter(),
 }
 
