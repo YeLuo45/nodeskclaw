@@ -488,6 +488,10 @@ export const useGeneStore = defineStore('gene', () => {
 
   async function deleteTemplate(id: string) {
     const res = await api.delete(`/instance-templates/${id}`)
+    templates.value = templates.value.filter((tpl) => tpl.id !== id)
+    featuredTemplates.value = featuredTemplates.value.filter((tpl) => tpl.id !== id)
+    if (currentTemplate.value?.id === id) currentTemplate.value = null
+    totalTemplates.value = Math.max(0, totalTemplates.value - 1)
     return res.data.data
   }
 

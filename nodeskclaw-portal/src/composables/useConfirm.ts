@@ -44,12 +44,16 @@ function showAlert(options: ConfirmOptions): Promise<void> {
 }
 
 function handleConfirm() {
-  state.value.resolve?.(true)
+  const resolve = state.value.resolve
+  state.value.resolve = null
+  resolve?.(true)
   state.value.visible = false
 }
 
 function handleCancel() {
-  state.value.resolve?.(false)
+  const resolve = state.value.resolve
+  state.value.resolve = null
+  resolve?.(false)
   state.value.visible = false
 }
 

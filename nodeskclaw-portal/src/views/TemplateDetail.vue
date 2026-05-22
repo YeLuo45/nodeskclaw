@@ -123,7 +123,7 @@ async function handleDelete() {
   try {
     await store.deleteTemplate(templateId.value)
     toast.success(t('template.deleted'))
-    router.push('/gene-market')
+    router.push({ path: '/gene-market', query: { tab: 'templates' } })
   } catch {
     toast.error(t('template.deleteFailed'))
   } finally {

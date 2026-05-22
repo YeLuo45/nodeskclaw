@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   Search,
@@ -39,11 +39,20 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
 const router = useRouter()
+const route = useRoute()
 const store = useGeneStore()
 const toast = useToast()
 const { t, locale } = useI18n()
 
-const viewMode = ref<'genes' | 'genomes' | 'templates' | 'evolution'>('genes')
+type GeneMarketViewMode = 'genes' | 'genomes' | 'templates' | 'evolution'
+
+function resolveViewMode(value: unknown): GeneMarketViewMode {
+  return value === 'genes' || value === 'genomes' || value === 'templates' || value === 'evolution'
+    ? value
+    : 'genes'
+}
+
+const viewMode = ref<GeneMarketViewMode>(resolveViewMode(route.query.tab))
 const keyword = ref('')
 const selectedTag = ref<string | null>(null)
 const selectedCategory = ref<string | null>(null)
@@ -278,6 +287,16 @@ watch([viewMode, selectedTag, selectedCategory, selectedVisibility, sortBy], () 
 })
 
 watch(page, loadData)
+
+watch(
+  () => route.query.tab,
+  (tab) => {
+    const nextMode = resolveViewMode(tab)
+    if (nextMode !== viewMode.value) {
+      viewMode.value = nextMode
+    }
+  }
+)
 
 function goToGene(slug: string) {
   router.push(`/gene-market/gene/${slug}`)
