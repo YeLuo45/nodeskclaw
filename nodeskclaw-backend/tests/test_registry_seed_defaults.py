@@ -110,6 +110,7 @@ async def test_seed_default_registry_configs_upgrades_legacy_hermes_registry(
     )
     assert rows["image_registry"].value == DEFAULT_REGISTRY_CONFIGS["image_registry"]
     assert "image_registry_nanobot" not in DEFAULT_REGISTRY_CONFIGS
+    assert "image_registry_nanobot" not in rows
     assert rows["legacy-marker"].value == "keep"
     assert sessions[0].commit_count == 1
 
