@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BadRequestError
 from app.models.instance import Instance
-from app.services.nfs_mount import remote_fs
 
 REQUIRED_FILES = ("AGENT.md", "SOUL.md", "config.json")
 MAX_FILE_BYTES = 512 * 1024
@@ -306,6 +305,8 @@ def build_bundle_env_vars(
 
 
 async def restore_agent_bundle(instance: Instance, manifest: dict[str, Any], db: AsyncSession) -> None:
+    from app.services.nfs_mount import remote_fs
+
     template_slug = normalize_bundle_slug(str(manifest.get("slug") or "agent-bundle"))
     base_rel = f".openclaw/agent-bundles/{template_slug}"
     files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
