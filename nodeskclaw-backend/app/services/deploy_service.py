@@ -134,6 +134,37 @@ def _collect_secret_env_refs(agent_bundle_manifest: dict | None) -> list[dict]:
     return collected
 
 
+async def _restore_agent_bundle_with_retry(
+    instance: Instance,
+    manifest: dict,
+    db: AsyncSession,
+    *,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+) -> None:
+    from app.services.agent_bundle_service import restore_agent_bundle
+
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            await restore_agent_bundle(instance, manifest, db)
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_retries:
+                break
+            logger.warning(
+                "AI 员工模板包恢复失败（第 %d 次重试）: instance_id=%s err=%s",
+                attempt + 1,
+                instance.id,
+                exc,
+            )
+            await asyncio.sleep(retry_delay)
+
+    assert last_error is not None
+    raise last_error
+
+
 # 正在运行的部署任务引用（deploy_id -> asyncio.Task）
 _running_tasks: dict[str, asyncio.Task] = {}
 
@@ -1308,13 +1339,11 @@ async def _execute_deploy_inner(ctx, async_session_factory, get_config, total, s
                     optional_step += 1
                     _publish(bundle_step, "恢复 AI 员工模板包")
                     try:
-                        from app.services.agent_bundle_service import restore_agent_bundle
-
-                        await restore_agent_bundle(instance, ctx.template_agent_bundle_manifest, db)
+                        await _restore_agent_bundle_with_retry(instance, ctx.template_agent_bundle_manifest, db)
                         _publish(bundle_step, "恢复 AI 员工模板包", status="success")
                     except Exception as bundle_err:
                         logger.warning(
-                            "AI 员工模板包恢复失败（非致命） [deploy_id=%s, instance_id=%s]: %s",
+                            "AI 员工模板包恢复失败（已重试） [deploy_id=%s, instance_id=%s]: %s",
                             ctx.record_id,
                             ctx.instance_id,
                             bundle_err,
@@ -1377,6 +1406,8 @@ async def _execute_deploy_inner(ctx, async_session_factory, get_config, total, s
                             logger.warning("Failed to increment template use count for %s", ctx.template_id, exc_info=True)
 
                 success_msg = f"部署成功{llm_sync_warning}{bundle_restore_warning}{gene_install_warning}"
+                record.message = success_msg
+                await db.commit()
                 _publish(total, "完成", status="success", message=success_msg)
                 logger.info("部署成功: %s (namespace=%s)", ctx.name, ctx.namespace)
             else:

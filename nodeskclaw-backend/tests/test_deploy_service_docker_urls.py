@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.core.exceptions import BadRequestError
@@ -7,6 +9,7 @@ from app.services.deploy_service import (
     DEPLOY_STEPS_BASE,
     _DeployContext,
     _require_supported_runtime,
+    _restore_agent_bundle_with_retry,
     _rewrite_docker_callback_url,
     _should_sync_runtime_llm_config,
 )
@@ -148,3 +151,59 @@ async def test_execute_deploy_pipeline_adds_agent_bundle_restore_step(monkeypatc
 
     assert captured["total"] == len(DEPLOY_STEPS_BASE) + 1
     assert captured["steps"] == [*DEPLOY_STEPS_BASE, "恢复 AI 员工模板包"]
+
+
+@pytest.mark.asyncio
+async def test_restore_agent_bundle_retries_transient_exec_failure(monkeypatch) -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    async def fake_restore(instance, manifest, db):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("exec not ready")
+
+    async def fake_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("app.services.agent_bundle_service.restore_agent_bundle", fake_restore)
+    monkeypatch.setattr(deploy_service.asyncio, "sleep", fake_sleep)
+
+    await _restore_agent_bundle_with_retry(
+        SimpleNamespace(id="instance-1"),
+        {"slug": "bundle-1"},
+        None,
+        max_retries=2,
+        retry_delay=0.5,
+    )
+
+    assert calls == 2
+    assert sleeps == [0.5]
+
+
+@pytest.mark.asyncio
+async def test_restore_agent_bundle_raises_after_retries(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_restore(instance, manifest, db):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("exec still unavailable")
+
+    async def fake_sleep(delay):
+        return None
+
+    monkeypatch.setattr("app.services.agent_bundle_service.restore_agent_bundle", fake_restore)
+    monkeypatch.setattr(deploy_service.asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(RuntimeError, match="exec still unavailable"):
+        await _restore_agent_bundle_with_retry(
+            SimpleNamespace(id="instance-1"),
+            {"slug": "bundle-1"},
+            None,
+            max_retries=2,
+            retry_delay=0.5,
+        )
+
+    assert calls == 3
