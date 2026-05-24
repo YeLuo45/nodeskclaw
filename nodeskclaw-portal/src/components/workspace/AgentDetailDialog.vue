@@ -11,7 +11,7 @@ import api from '@/services/api'
 import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import type { InstanceSkillItem, InstanceGeneItem, GenomeItem } from '@/stores/gene'
-import { getRuntimeCaps, getRuntimeDefaultCapabilities } from '@/utils/runtimeCapabilities'
+import { getRuntimeCaps, getRuntimeDefaultCapabilities, setRuntimeEngines } from '@/utils/runtimeCapabilities'
 import { copyToClipboard } from '@/utils/clipboard'
 import { formatDate } from '@/utils/localeFormat'
 import { Button } from '@/components/ui/button'
@@ -113,6 +113,7 @@ function genesPageHref(): string {
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let pollTimeout: ReturnType<typeof setTimeout> | null = null
+let genesFetchKey: string | null = null
 
 const statusColors: Record<string, string> = {
   running: 'text-green-400',
@@ -138,8 +139,28 @@ function close() {
   emit('update:visible', false)
 }
 
+function fetchGenesIfSupported() {
+  if (!props.instanceId) return
+  const runtime = instance.value?.runtime ?? 'openclaw'
+  if (!getRuntimeCaps(runtime).genes) return
+  const key = `${props.instanceId}:${runtime}`
+  if (genesFetchKey === key) return
+  genesFetchKey = key
+  fetchGenes()
+}
+
+function hydrateRuntimeEngines() {
+  api.get('/engines')
+    .then((enginesRes) => {
+      setRuntimeEngines(enginesRes.data.data ?? [])
+      fetchGenesIfSupported()
+    })
+    .catch(() => undefined)
+}
+
 async function fetchDetail() {
   if (!props.instanceId) return
+  genesFetchKey = null
   loading.value = true
   error.value = ''
   try {
@@ -159,9 +180,8 @@ async function fetchDetail() {
   } finally {
     loading.value = false
   }
-  if (getRuntimeCaps(instance.value?.runtime ?? 'openclaw').genes) {
-    fetchGenes()
-  }
+  fetchGenesIfSupported()
+  hydrateRuntimeEngines()
 }
 
 async function fetchGenes() {
@@ -324,6 +344,7 @@ watch(() => props.visible, (val) => {
     skills.value = []
     instanceGenes.value = []
     appliedGenomes.value = []
+    genesFetchKey = null
     fetchDetail()
   } else {
     stopPolling()

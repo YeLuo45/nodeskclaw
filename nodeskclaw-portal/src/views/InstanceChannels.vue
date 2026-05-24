@@ -6,6 +6,7 @@ import {
   Upload, Package, FolderGit2, AlertCircle, Check, Eye, EyeOff,
 } from 'lucide-vue-next'
 import api from '@/services/api'
+import { getRuntimeCaps } from '@/utils/runtimeCapabilities'
 import CustomSelect from '@/components/shared/CustomSelect.vue'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -15,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 const { t } = useI18n()
 const instanceId = inject<ComputedRef<string>>('instanceId')!
 const instanceRuntime = inject<ComputedRef<string>>('instanceRuntime', computed(() => 'openclaw'))
+const runtimeCaps = computed(() => getRuntimeCaps(instanceRuntime.value))
 
 interface SchemaField {
   key: string
@@ -39,7 +41,10 @@ interface AvailableChannel {
   supported?: boolean
 }
 
-const supportsPluginInstall = computed(() => instanceRuntime.value === 'openclaw')
+const supportsPluginInstall = computed(() =>
+  runtimeCaps.value.npmChannelInstall
+  || runtimeCaps.value.uploadChannelPlugin
+)
 
 function runtimeBadgeText(ch: AvailableChannel): string | null {
   if (!ch.schema?.length) return null
@@ -88,7 +93,6 @@ const customInstallOpen = ref(false)
 const npmPackageName = ref('')
 const npmInstalling = ref(false)
 const uploadingFile = ref(false)
-const deployingRepo = ref(false)
 
 const SENSITIVE_KEYS = new Set([
   'appSecret', 'botToken', 'appToken', 'token', 'appPassword',
@@ -517,7 +521,7 @@ watch(() => instanceId.value, (val) => {
         </div>
       </div>
 
-      <!-- Custom install section (OpenClaw only) -->
+      <!-- Custom install section -->
       <div v-if="supportsPluginInstall" class="space-y-3">
         <Button variant="unstyled" size="unstyled"
           class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -530,7 +534,7 @@ watch(() => instanceId.value, (val) => {
 
         <div v-if="customInstallOpen" class="space-y-4 p-4 rounded-lg border border-border bg-card">
           <!-- npm install -->
-          <div class="space-y-2">
+          <div v-if="runtimeCaps.npmChannelInstall" class="space-y-2">
             <div class="flex items-center gap-2">
               <Package class="w-3.5 h-3.5 text-muted-foreground" />
               <span class="text-xs font-medium">{{ t('channel.installNpm') }}</span>
@@ -558,7 +562,7 @@ watch(() => instanceId.value, (val) => {
           </div>
 
           <!-- Upload -->
-          <div class="space-y-2">
+          <div v-if="runtimeCaps.uploadChannelPlugin" class="space-y-2">
             <div class="flex items-center gap-2">
               <Upload class="w-3.5 h-3.5 text-muted-foreground" />
               <span class="text-xs font-medium">{{ t('channel.uploadPlugin') }}</span>

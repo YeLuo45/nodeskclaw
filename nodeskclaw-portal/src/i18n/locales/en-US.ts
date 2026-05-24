@@ -1692,6 +1692,9 @@ const enUS = {
       config_parse_failed: "Runtime config cannot be parsed",
       too_large: "File content exceeds the allowed size",
     },
+    runtime: {
+      unsupported_capability: "This runtime does not support {capability}",
+    },
     system: {
       internal_error: "Internal server error",
       backend_starting: "Backend service is starting, please retry shortly",

@@ -1,10 +1,13 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { getCurrentLocale } from '@/i18n'
+import { resolveApiErrorMessage } from '@/i18n/error'
 import { useToast } from '@/composables/useToast'
 import { i18n } from '@/i18n'
 
 let lastBackendWarningAt = 0
 const BACKEND_WARNING_COOLDOWN = 15_000
+let lastUnsupportedCapabilityAt = 0
+const UNSUPPORTED_CAPABILITY_COOLDOWN = 3000
 
 function notifyBackendUnavailable(status?: number) {
   const now = Date.now()
@@ -18,6 +21,21 @@ function notifyBackendUnavailable(status?: number) {
       ? 'errors.system.backend_starting'
       : 'errors.system.backend_unreachable'
   toast.warning(t(key), { duration: 6000 })
+}
+
+function notifyUnsupportedCapability(error: AxiosError) {
+  const data = error.response?.data as any
+  const isUnsupported =
+    data?.details?.code === 'UNSUPPORTED_CAPABILITY'
+    || data?.message_key === 'errors.runtime.unsupported_capability'
+  if (!isUnsupported) return
+
+  const now = Date.now()
+  if (now - lastUnsupportedCapabilityAt < UNSUPPORTED_CAPABILITY_COOLDOWN) return
+  lastUnsupportedCapabilityAt = now
+
+  const toast = useToast()
+  toast.warning(resolveApiErrorMessage(error), { duration: 5000 })
 }
 
 const TOKEN_KEY = 'portal_token'
@@ -125,6 +143,8 @@ api.interceptors.response.use(
         import('@/router').then(({ default: router }) => router.push('/force-change-password'))
       }
     }
+
+    notifyUnsupportedCapability(error)
 
     return Promise.reject(error)
   },

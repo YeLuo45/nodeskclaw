@@ -1692,6 +1692,9 @@ const zhCN = {
       config_parse_failed: "运行时配置无法解析",
       too_large: "文件内容超过允许大小",
     },
+    runtime: {
+      unsupported_capability: "当前运行时不支持 {capability} 能力",
+    },
     system: {
       internal_error: "服务器内部错误",
       backend_starting: "后端服务正在启动中，请稍候重试",

@@ -20,12 +20,14 @@ class AppException(Exception):
         message_key: str | None = None,
         error_code: int | None = None,
         message_params: dict[str, str] | None = None,
+        details: dict[str, Any] | None = None,
     ):
         self.code = code
         self.error_code = error_code if error_code is not None else code
         self.message = message
         self.message_key = message_key
         self.message_params = message_params
+        self.details = details
         self.status_code = status_code
 
 
@@ -73,6 +75,37 @@ class K8sError(AppException):
 class RegistryError(AppException):
     def __init__(self, message: str = "镜像仓库请求失败", message_key: str = "errors.registry.request_failed"):
         super().__init__(code=50220, message=message, status_code=502, message_key=message_key)
+
+
+class UnsupportedCapabilityError(AppException):
+    def __init__(
+        self,
+        runtime_id: str,
+        capability: str,
+        operation: str | None = None,
+        message: str | None = None,
+    ):
+        details = {
+            "code": "UNSUPPORTED_CAPABILITY",
+            "runtime_id": runtime_id,
+            "capability": capability,
+        }
+        params = {
+            "runtime_id": runtime_id,
+            "capability": capability,
+        }
+        if operation:
+            details["operation"] = operation
+            params["operation"] = operation
+
+        super().__init__(
+            code=40080,
+            message=message or f"当前运行时不支持 {capability} 能力",
+            status_code=400,
+            message_key="errors.runtime.unsupported_capability",
+            message_params=params,
+            details=details,
+        )
 
 
 HTTP_STATUS_DEFAULT_CODES: dict[int, int] = {
@@ -125,6 +158,8 @@ def register_exception_handlers(app: FastAPI) -> None:
         }
         if exc.message_params:
             body["message_params"] = exc.message_params
+        if exc.details:
+            body["details"] = exc.details
         return JSONResponse(status_code=exc.status_code, content=body)
 
     @app.exception_handler(HTTPException)

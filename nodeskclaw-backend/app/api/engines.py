@@ -25,6 +25,21 @@ async def list_engines(_user: User = Depends(get_current_user)):
             "image_registry_key": spec.image_registry_key,
             "default_registry_url": DEFAULT_REGISTRY_CONFIGS.get(spec.image_registry_key, ""),
             "available": spec.available,
+            "gateway_port": spec.gateway_port,
+            "health_probe_path": spec.health_probe_path,
+            "readiness_probe_path": spec.readiness_probe_path,
+            "config_rel_path": spec.config_rel_path,
+            "config_format": spec.config_format,
+            "channels_section_key": spec.channels_section_key,
+            "field_naming": spec.field_naming,
+            "supports_channel_plugins": spec.supports_channel_plugins,
+            "data_dir_container_path": spec.data_dir_container_path,
+            "skills_dir_rel": spec.skills_dir_rel,
+            "scripts_dir_rel": spec.scripts_dir_rel,
+            "has_web_ui": spec.has_web_ui,
+            "backup_dirs": list(spec.backup_dirs),
+            "backup_exclude_patterns": list(spec.backup_exclude_patterns),
+            "capabilities": spec.capability_map(),
         })
     engines.sort(key=lambda r: r["order"])
     return ApiResponse(data=engines)

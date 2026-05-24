@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from app.services.runtime.gene_install_adapter import GeneInstallAdapter
@@ -10,10 +9,10 @@ from app.services.runtime.gene_install_adapter import GeneInstallAdapter
 if TYPE_CHECKING:
     from app.services.nfs_mount import RemoteFS
 
-logger = logging.getLogger(__name__)
-
 
 class HermesGeneInstallAdapter(GeneInstallAdapter):
+    runtime_id = "hermes"
+
     def __init__(
         self,
         skills_dir_rel: str = ".hermes/skills",
@@ -42,23 +41,12 @@ class HermesGeneInstallAdapter(GeneInstallAdapter):
         await fs.mkdir(f"{self._skills_dir}/{skill_name}")
         await fs.write_text(f"{self._skills_dir}/{skill_name}/SKILL.md", content)
 
-    async def allow_tools(self, fs: RemoteFS, tool_names: list[str]) -> None:
-        if tool_names:
-            logger.info("HermesGeneInstallAdapter: ignoring OpenClaw tool_allow entries: %s", tool_names)
-
     async def deploy_scripts(self, fs: RemoteFS, scripts: dict[str, str]) -> None:
         if not scripts:
             return
         await fs.mkdir(self._scripts_dir)
         for filename, content in scripts.items():
             await fs.write_text(f"{self._scripts_dir}/{filename}", content)
-
-    async def apply_config(self, fs: RemoteFS, config_patch: dict) -> None:
-        if config_patch:
-            logger.info(
-                "HermesGeneInstallAdapter: ignoring OpenClaw runtime config patch: %s",
-                list(config_patch.keys()),
-            )
 
     async def invalidate_cache(self, fs: RemoteFS, skill_name: str, event: str = "installed") -> None:
         await fs.remove(self._snapshot_rel)

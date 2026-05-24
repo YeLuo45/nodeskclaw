@@ -22,6 +22,8 @@ SCRIPTS_DIR_REL = ".deskclaw/tools"
 
 
 class NoopGeneInstallAdapter(GeneInstallAdapter):
+    def __init__(self, runtime_id: str = "unknown"):
+        self.runtime_id = runtime_id
 
     async def deploy_skill(
         self, fs: RemoteFS, skill_name: str, content: str, description: str = "",
@@ -29,28 +31,12 @@ class NoopGeneInstallAdapter(GeneInstallAdapter):
         await fs.mkdir(f"{SKILLS_DIR_REL}/{skill_name}")
         await fs.write_text(f"{SKILLS_DIR_REL}/{skill_name}/SKILL.md", content)
 
-    async def allow_tools(self, fs: RemoteFS, tool_names: list[str]) -> None:
-        if tool_names:
-            logger.warning(
-                "NoopGeneInstallAdapter: allow_tools(%s) called but no runtime-specific "
-                "implementation — tools may not be available to the agent",
-                tool_names,
-            )
-
     async def deploy_scripts(self, fs: RemoteFS, scripts: dict[str, str]) -> None:
         if not scripts:
             return
         await fs.mkdir(SCRIPTS_DIR_REL)
         for filename, content in scripts.items():
             await fs.write_text(f"{SCRIPTS_DIR_REL}/{filename}", content)
-
-    async def apply_config(self, fs: RemoteFS, config_patch: dict) -> None:
-        if config_patch:
-            logger.warning(
-                "NoopGeneInstallAdapter: apply_config called but no runtime-specific "
-                "implementation — config patch dropped: %s",
-                list(config_patch.keys()),
-            )
 
     async def invalidate_cache(self, fs: RemoteFS, skill_name: str, event: str = "installed") -> None:
         logger.debug("NoopGeneInstallAdapter: cache invalidation not implemented for skill=%s", skill_name)

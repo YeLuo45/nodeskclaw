@@ -105,8 +105,16 @@ const filteredItems = computed(() => {
 
 const hasUnsavedChanges = computed(() => editing.value && panelContent.value !== panelOriginalContent.value)
 
-watch(dataRoot, (root) => {
-  if (!currentPath.value || currentPath.value === '.openclaw') {
+watch(dataRoot, (root, previousRoot) => {
+  if (!root) {
+    if (!currentPath.value || currentPath.value === '.openclaw' || currentPath.value === '.deskclaw' || currentPath.value === previousRoot) {
+      currentPath.value = ''
+      listing.value = null
+      loading.value = false
+    }
+    return
+  }
+  if (!currentPath.value || currentPath.value === '.openclaw' || currentPath.value === '.deskclaw' || currentPath.value === previousRoot) {
     currentPath.value = root
     fetchFiles()
   }

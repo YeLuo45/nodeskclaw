@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useOrgStore } from '@/stores/org'
 import { useI18n } from 'vue-i18n'
 import { useEdition } from '@/composables/useFeature'
-import { getRuntimeCaps } from '@/utils/runtimeCapabilities'
+import { getRuntimeCaps, setRuntimeEngines, type RuntimeEnginePayload } from '@/utils/runtimeCapabilities'
 import { buildDefaultSpecPresets } from '@/utils/instanceFlow'
 import {
   PROVIDERS, PROVIDER_LABELS, PROVIDER_DEFAULT_URLS,
@@ -58,6 +58,9 @@ interface EngineItem {
   display_powered_by: string
   order: number
   available: boolean
+  capabilities?: RuntimeEnginePayload['capabilities']
+  data_dir_container_path?: string | null
+  config_rel_path?: string | null
 }
 const engines = ref<EngineItem[]>([])
 const selectedRuntime = ref('openclaw')
@@ -464,6 +467,7 @@ onMounted(async () => {
       }
     }
     engines.value = (enginesRes.data.data ?? []) as EngineItem[]
+    setRuntimeEngines(engines.value)
     if (engines.value.length > 0 && !engines.value.find(e => e.runtime_id === selectedRuntime.value)) {
       selectedRuntime.value = engines.value[0].runtime_id
     }

@@ -30,6 +30,7 @@ from app.services.channel_config_service import (
     upload_channel_plugin,
     write_channel_configs,
 )
+from app.services.runtime.registries.runtime_registry import runtime_supports_capability
 from app.services.unified_channel_schema import get_channel_schema
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ async def list_available_channels(
             ch["schema"] = schema
 
     repo_channels = []
-    if runtime == "openclaw":
+    if runtime_supports_capability(runtime, "repo_channel_sync"):
         for cid, info in REPO_CHANNEL_PLUGINS.items():
             if not any(c["id"] == cid for c in channels):
                 repo_channels.append({
