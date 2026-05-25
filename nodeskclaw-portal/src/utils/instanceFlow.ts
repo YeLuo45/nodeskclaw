@@ -20,7 +20,26 @@ export interface EngineInfo {
   tags: string[]
 }
 
-type Translator = (key: string, params?: Record<string, unknown>) => string
+export type Translator = (key: string, params?: Record<string, unknown>) => string
+
+export const K8S_DEPLOY_BACKEND_STEP_NAMES = [
+  '预检',
+  '创建命名空间',
+  '创建 ConfigMap',
+  '创建 PVC',
+  '创建 Deployment',
+  '创建 Service',
+  '创建 Ingress（自动路由）',
+  '配置网络策略',
+  '等待 Deployment 就绪',
+]
+
+const K8S_DEPLOY_BACKEND_STEP_COUNT = K8S_DEPLOY_BACKEND_STEP_NAMES.length
+
+export interface DeployProgressStepMapping {
+  stepNames: string[]
+  directMapping: boolean
+}
 
 export function buildDefaultSpecPresets(t: Translator): SpecPreset[] {
   return [
@@ -72,6 +91,46 @@ export function buildDefaultBackendStepNames(t: Translator): string[] {
     t('deployProgress.backendNetworkPolicy'),
     t('deployProgress.backendWaitReady'),
   ]
+}
+
+function startsWithStepNames(stepNames: string[], expected: string[]): boolean {
+  if (stepNames.length < expected.length) return false
+  return expected.every((name, index) => stepNames[index] === name)
+}
+
+export function isK8sDeployBackendStepNames(stepNames: string[], t: Translator): boolean {
+  return (
+    startsWithStepNames(stepNames, K8S_DEPLOY_BACKEND_STEP_NAMES)
+    || startsWithStepNames(stepNames, buildDefaultBackendStepNames(t))
+  )
+}
+
+export function buildDeployProgressStepMapping(stepNames: string[], t: Translator): DeployProgressStepMapping {
+  if (!isK8sDeployBackendStepNames(stepNames, t)) {
+    return {
+      stepNames: [...stepNames],
+      directMapping: true,
+    }
+  }
+
+  const portalStepNames = buildPortalDeploySteps(t)
+  for (const name of stepNames.slice(K8S_DEPLOY_BACKEND_STEP_COUNT)) {
+    portalStepNames.push(name)
+  }
+
+  return {
+    stepNames: portalStepNames,
+    directMapping: false,
+  }
+}
+
+export function backendStepToPortalIndex(backendStep: number, directMapping: boolean): number {
+  if (directMapping) return backendStep - 1
+  if (backendStep <= 1) return 0
+  if (backendStep <= 4) return 1
+  if (backendStep <= 8) return 2
+  if (backendStep === K8S_DEPLOY_BACKEND_STEP_COUNT) return 3
+  return 3 + (backendStep - K8S_DEPLOY_BACKEND_STEP_COUNT)
 }
 
 export function sanitizeDeployLogs(lines: string[], t: Translator): string[] {
