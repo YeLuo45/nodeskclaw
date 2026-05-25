@@ -448,6 +448,7 @@ async def check_template_deploy_layout(
             selected_agent_indices=body.selected_agent_indices,
             excluded_corridor_coords=body.excluded_corridor_coords,
             agent_positions=body.agent_positions,
+            require_explicit_agent_positions=True,
         )
     )
 

@@ -1,8 +1,10 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select
 
+from app.api import templates as templates_api
 from app.models.cluster import Cluster
 from app.models.organization import Organization
 from app.models.user import User
@@ -83,6 +85,51 @@ def test_deploy_layout_requires_explicit_confirmed_positions():
 
     assert result["can_deploy"] is False
     assert result["issues"][0]["code"] == "missing_position"
+
+
+@pytest.mark.asyncio
+async def test_layout_check_endpoint_requires_explicit_positions(monkeypatch):
+    template = _template([{"display_name": "A", "hex_q": 1, "hex_r": 0}])
+
+    async def fake_get_template_with_access(template_id, org_id, db):
+        assert template_id == template.id
+        assert org_id == template.org_id
+        assert db is not None
+        return template
+
+    monkeypatch.setattr(templates_api, "_get_template_with_access", fake_get_template_with_access)
+
+    response = await templates_api.check_template_deploy_layout(
+        template.id,
+        templates_api.TemplateDeployLayoutCheckRequest(),
+        org_ctx=(None, SimpleNamespace(id=template.org_id)),
+        db=SimpleNamespace(),
+    )
+
+    assert response["data"]["can_deploy"] is False
+    assert response["data"]["issues"][0]["code"] == "missing_position"
+
+
+@pytest.mark.asyncio
+async def test_layout_check_endpoint_accepts_confirmed_positions(monkeypatch):
+    template = _template([{"display_name": "A", "hex_q": 1, "hex_r": 0}])
+
+    async def fake_get_template_with_access(*_args):
+        return template
+
+    monkeypatch.setattr(templates_api, "_get_template_with_access", fake_get_template_with_access)
+
+    response = await templates_api.check_template_deploy_layout(
+        template.id,
+        templates_api.TemplateDeployLayoutCheckRequest(
+            agent_positions=[{"agent_index": 0, "hex_q": 2, "hex_r": -1}],
+        ),
+        org_ctx=(None, SimpleNamespace(id=template.org_id)),
+        db=SimpleNamespace(),
+    )
+
+    assert response["data"]["can_deploy"] is True
+    assert response["data"]["agent_positions"] == [{"agent_index": 0, "hex_q": 2, "hex_r": -1}]
 
 
 def test_layout_rewrites_topology_edges_after_agent_move():
