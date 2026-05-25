@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import BadRequestError
+from app.models.deploy_record import DeployStatus
 from app.schemas.deploy import DeployRequest
 from app.services import deploy_service
 from app.services.deploy_service import (
@@ -13,6 +14,22 @@ from app.services.deploy_service import (
     _rewrite_docker_callback_url,
     _should_sync_runtime_llm_config,
 )
+
+
+class _ScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalar_one_or_none(self):
+        return self.value
+
+
+class _FakeDb:
+    def __init__(self, value):
+        self.value = value
+
+    async def execute(self, *_args, **_kwargs):
+        return _ScalarResult(self.value)
 
 
 def test_rewrite_docker_callback_url_rewrites_docker_desktop_host() -> None:
@@ -51,6 +68,29 @@ def test_require_supported_runtime_rejects_removed_nanobot_runtime() -> None:
     assert exc_info.value.status_code == 400
     assert exc_info.value.message_key == "errors.validation.invalid_runtime"
     assert "nanobot" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_deploy_progress_snapshot_replays_success_record() -> None:
+    snapshot = await deploy_service.get_deploy_progress_snapshot(
+        "deploy-1",
+        _FakeDb(SimpleNamespace(status=DeployStatus.success, message="部署成功")),
+    )
+
+    assert snapshot is not None
+    assert snapshot.status == "success"
+    assert snapshot.percent == 100
+    assert snapshot.step_names == DEPLOY_STEPS_BASE
+
+
+@pytest.mark.asyncio
+async def test_deploy_progress_snapshot_skips_running_record() -> None:
+    snapshot = await deploy_service.get_deploy_progress_snapshot(
+        "deploy-1",
+        _FakeDb(SimpleNamespace(status=DeployStatus.running, message=None)),
+    )
+
+    assert snapshot is None
 
 
 @pytest.mark.asyncio

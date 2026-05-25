@@ -82,7 +82,7 @@ function sanitizeLogs(lines: string[]): string[] {
   return sanitizeDeployLogs(lines, t)
 }
 
-function updateSteps(backendStep: number, status: string, message?: string, logs?: string[]) {
+function updateSteps(backendStep: number, status: string, message?: string, logs?: string[], totalSteps?: number) {
   const portalIdx = backendStepToPortalIndex(backendStep)
 
   for (let i = 0; i < portalIdx; i++) {
@@ -94,14 +94,16 @@ function updateSteps(backendStep: number, status: string, message?: string, logs
 
   const filtered = logs?.length ? sanitizeLogs(logs) : []
 
-  if (status === 'success') {
+  const isFinalEvent = totalSteps ? backendStep >= totalSteps : false
+
+  if (status === 'success' && isFinalEvent) {
     for (const s of steps.value) {
       s.status = 'completed'
       s.expanded = false
     }
     finalStatus.value = 'success'
     finalMessage.value = message || t('deployProgress.successTitle')
-  } else if (status === 'failed') {
+  } else if (status === 'failed' && isFinalEvent) {
     const s = steps.value[portalIdx]
     if (s) {
       s.status = 'failed'
@@ -111,6 +113,14 @@ function updateSteps(backendStep: number, status: string, message?: string, logs
     }
     finalStatus.value = 'failed'
     finalMessage.value = message || t('deployProgress.failedTitle')
+  } else if (status === 'success') {
+    const s = steps.value[portalIdx]
+    if (s) {
+      s.status = 'completed'
+      s.message = message
+      if (filtered.length) s.logs.push(...filtered)
+      s.expanded = false
+    }
   } else {
     const s = steps.value[portalIdx]
     if (s) {
@@ -152,9 +162,9 @@ function subscribeSSE() {
           initPortalSteps(backendNames)
         }
 
-        updateSteps(data.step, data.status, data.message, data.logs)
+        updateSteps(data.step, data.status, data.message, data.logs, data.total_steps)
 
-        if (data.status === 'success' || data.status === 'failed') {
+        if ((data.status === 'success' || data.status === 'failed') && data.step >= data.total_steps) {
           if (sseTimeout) clearTimeout(sseTimeout)
           abortCtrl?.abort()
         }

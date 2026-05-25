@@ -506,6 +506,7 @@ def build_network_policy(
     egress_enabled: bool = True,
     ingress_allow_cidrs: list[str] | None = None,
     platform_host_endpoints: list[tuple[str, int]] | None = None,
+    ingress_controller_namespaces: list[str] | None = None,
 ) -> dict:
     """Build NetworkPolicy for multi-tenant isolation + egress restriction.
 
@@ -525,6 +526,11 @@ def build_network_policy(
             {"podSelector": {}},
             {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": platform_namespace}}},
         ]
+        for ns in ingress_controller_namespaces or ["kube-system", "ingress-nginx"]:
+            if ns and ns != platform_namespace:
+                ingress_from.append({
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ns}},
+                })
         for ns in peer_namespaces:
             ingress_from.append({
                 "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ns}},

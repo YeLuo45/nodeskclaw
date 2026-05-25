@@ -20,7 +20,7 @@ from app.models.user import User
 from app.schemas.common import ApiResponse
 from app.schemas.deploy import DeployProgress, DeployRequest, PrecheckResult
 from app.services import deploy_service
-from app.services.k8s.event_bus import event_bus
+from app.services.k8s.event_bus import SSEEvent, event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +97,26 @@ async def cancel_deploy_endpoint(
 
 
 @router.get("/progress/{deploy_id}")
-async def deploy_progress_stream(deploy_id: str):
+async def deploy_progress_stream(
+    deploy_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    snapshot = await deploy_service.get_deploy_progress_snapshot(deploy_id, db)
+
     async def generate():
+        if snapshot:
+            yield SSEEvent(
+                event="deploy_progress",
+                data=snapshot.model_dump(),
+            ).format()
+            return
+
         async for event in event_bus.subscribe("deploy_progress"):
             if event.data.get("deploy_id") == deploy_id:
                 yield event.format()
-                if event.data.get("status") in ("success", "failed"):
+                step = event.data.get("step") or 0
+                total_steps = event.data.get("total_steps") or 0
+                if event.data.get("status") in ("success", "failed") and step >= total_steps:
                     break
 
     return StreamingResponse(generate(), media_type="text/event-stream")

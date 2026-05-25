@@ -198,7 +198,7 @@ async def _run_post_ready_instance_steps(
                 if ctx.runtime == "openclaw":
                     await ensure_openclaw_gateway_config(instance, db)
                 await sync_runtime_llm_config(instance, db)
-                publish(config_step, "应用实例配置", status="success")
+                publish(config_step, "应用实例配置")
             elif ctx.runtime == "openclaw":
                 await ensure_openclaw_gateway_config(instance, db)
         except Exception as e:
@@ -208,7 +208,7 @@ async def _run_post_ready_instance_steps(
             )
             llm_sync_warning = "（LLM 配置同步失败，可在管理后台手动重试）"
             if ctx.should_sync_runtime_llm_config:
-                publish(config_step, "应用实例配置", status="failed", message=str(e)[:200])
+                publish(config_step, "应用实例配置", message=str(e)[:200])
 
     bundle_restore_warning = ""
     if ctx.template_agent_bundle_manifest:
@@ -217,7 +217,7 @@ async def _run_post_ready_instance_steps(
         publish(bundle_step, "恢复 AI 员工模板包")
         try:
             await _restore_agent_bundle_with_retry(instance, ctx.template_agent_bundle_manifest, db)
-            publish(bundle_step, "恢复 AI 员工模板包", status="success")
+            publish(bundle_step, "恢复 AI 员工模板包")
         except Exception as bundle_err:
             logger.warning(
                 "AI 员工模板包恢复失败（已重试） [deploy_id=%s, instance_id=%s]: %s",
@@ -227,7 +227,7 @@ async def _run_post_ready_instance_steps(
                 exc_info=True,
             )
             bundle_restore_warning = "（AI 员工模板包恢复失败，可在实例详情中重试或检查模板）"
-            publish(bundle_step, "恢复 AI 员工模板包", status="failed", message=str(bundle_err)[:200])
+            publish(bundle_step, "恢复 AI 员工模板包", message=str(bundle_err)[:200])
 
     gene_install_warning = ""
     if ctx.template_gene_slugs:
@@ -272,11 +272,10 @@ async def _run_post_ready_instance_steps(
             publish(
                 gene_step,
                 "安装模板技能基因",
-                status="success",
                 message=f"{installed_count}/{len(ctx.template_gene_slugs)} 安装成功",
             )
         else:
-            publish(gene_step, "安装模板技能基因", status="success")
+            publish(gene_step, "安装模板技能基因")
 
         if ctx.template_id:
             try:
@@ -413,6 +412,34 @@ DEPLOY_STEPS_BASE = [
     "配置网络策略",
     "等待 Deployment 就绪",
 ]
+
+
+async def get_deploy_progress_snapshot(
+    deploy_id: str,
+    db: AsyncSession,
+) -> DeployProgress | None:
+    result = await db.execute(
+        select(DeployRecord).where(
+            DeployRecord.id == deploy_id,
+            DeployRecord.deleted_at.is_(None),
+        )
+    )
+    record = result.scalar_one_or_none()
+    if not record or record.status not in (DeployStatus.success, DeployStatus.failed):
+        return None
+
+    status = "success" if record.status == DeployStatus.success else "failed"
+    current_step = "完成" if status == "success" else "失败"
+    return DeployProgress(
+        deploy_id=deploy_id,
+        step=len(DEPLOY_STEPS_BASE),
+        total_steps=len(DEPLOY_STEPS_BASE),
+        current_step=current_step,
+        status=status,
+        message=record.message,
+        percent=100,
+        step_names=DEPLOY_STEPS_BASE,
+    )
 
 
 async def precheck(req: DeployRequest, db: AsyncSession) -> PrecheckResult:

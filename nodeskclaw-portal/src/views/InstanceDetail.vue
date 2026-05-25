@@ -407,7 +407,7 @@ async function fetchSkills() {
   try {
     const res = await api.get(`/instances/${instanceId.value}/skills`)
     skills.value = (res.data?.data ?? [])
-      .filter((s: any) => s.type === 'emerged')
+      .filter((s: any) => s.type === 'emerged' || s.type === 'hub')
       .map((s: any) => ({
         skill_name: s.skill_name,
         name: s.name || s.skill_name,
