@@ -1,7 +1,7 @@
 """add_workspace_attribution_to_llm_usage
 
 Revision ID: 6d2f8f1a9b3c
-Revises: 4d65cb510bbd
+Revises: 7056e344e55a
 Create Date: 2026-05-24 00:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "6d2f8f1a9b3c"
-down_revision: str | Sequence[str] | None = "4d65cb510bbd"
+down_revision: str | Sequence[str] | None = "7056e344e55a"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
