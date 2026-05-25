@@ -9,8 +9,9 @@ import {
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { Button } from '@/components/ui/button'
 import {
+  backendStepToPortalIndex,
+  buildDeployProgressStepMapping,
   buildDefaultBackendStepNames,
-  buildPortalDeploySteps,
   sanitizeDeployLogs,
 } from '@/utils/instanceFlow'
 
@@ -22,32 +23,7 @@ const deployId = route.params.deployId as string
 const instanceName = (route.query.name as string) || ''
 const instanceId = (route.query.instanceId as string) || ''
 
-const K8S_BACKEND_STEP_COUNT = 9
 let useDirectMapping = false
-
-function buildPortalSteps(backendStepNames: string[]): string[] {
-  if (backendStepNames.length < K8S_BACKEND_STEP_COUNT) {
-    useDirectMapping = true
-    return [...backendStepNames]
-  }
-  useDirectMapping = false
-  const portal = buildPortalDeploySteps(t)
-  if (backendStepNames.length > K8S_BACKEND_STEP_COUNT) {
-    for (const name of backendStepNames.slice(K8S_BACKEND_STEP_COUNT)) {
-      portal.push(name)
-    }
-  }
-  return portal
-}
-
-function backendStepToPortalIndex(backendStep: number): number {
-  if (useDirectMapping) return backendStep - 1
-  if (backendStep <= 1) return 0
-  if (backendStep <= 4) return 1
-  if (backendStep <= 8) return 2
-  if (backendStep === 9) return 3
-  return 3 + (backendStep - K8S_BACKEND_STEP_COUNT)
-}
 
 type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
 
@@ -69,8 +45,9 @@ let abortCtrl: AbortController | null = null
 let sseTimeout: ReturnType<typeof setTimeout> | null = null
 
 function initPortalSteps(backendStepNames: string[]) {
-  const portalNames = buildPortalSteps(backendStepNames)
-  steps.value = portalNames.map((name) => ({ name, status: 'pending', logs: [], expanded: false }))
+  const mapping = buildDeployProgressStepMapping(backendStepNames, t)
+  useDirectMapping = mapping.directMapping
+  steps.value = mapping.stepNames.map((name) => ({ name, status: 'pending', logs: [], expanded: false }))
   stepsInitialized.value = true
 }
 
@@ -83,7 +60,7 @@ function sanitizeLogs(lines: string[]): string[] {
 }
 
 function updateSteps(backendStep: number, status: string, message?: string, logs?: string[], totalSteps?: number) {
-  const portalIdx = backendStepToPortalIndex(backendStep)
+  const portalIdx = backendStepToPortalIndex(backendStep, useDirectMapping)
 
   for (let i = 0; i < portalIdx; i++) {
     if (steps.value[i] && steps.value[i].status !== 'completed') {
@@ -125,7 +102,7 @@ function updateSteps(backendStep: number, status: string, message?: string, logs
     const s = steps.value[portalIdx]
     if (s) {
       if (s.status !== 'in_progress') s.status = 'in_progress'
-      const waitingIdx = backendStepToPortalIndex(9)
+      const waitingIdx = backendStepToPortalIndex(9, useDirectMapping)
       if (portalIdx === waitingIdx && filtered.length) {
         s.logs = filtered
       } else if (filtered.length) {

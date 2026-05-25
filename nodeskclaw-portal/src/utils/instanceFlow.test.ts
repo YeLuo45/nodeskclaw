@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  K8S_DEPLOY_BACKEND_STEP_NAMES,
+  backendStepToPortalIndex,
+  buildDeployProgressStepMapping,
   buildDefaultBackendStepNames,
   buildDefaultSpecPresets,
   buildEngineInfoMap,
   buildPortalDeploySteps,
   sanitizeDeployLogs,
 } from './instanceFlow'
+
+const REBUILD_STEPS = [
+  '检查实例状态',
+  '重建命名空间',
+  '重建 ConfigMap',
+  '重建 PVC',
+  '重建 Deployment',
+  '重建 Service',
+  '重建 Ingress',
+  '配置网络策略',
+  '等待 Deployment 就绪',
+]
 
 const messages: Record<string, string> = {
   'createInstance.specSmallLabel': 'Small',
@@ -78,6 +93,37 @@ describe('instanceFlow', () => {
   it('builds localized deploy steps', () => {
     expect(buildPortalDeploySteps(t)).toEqual(['Preflight', 'Provision', 'Deploy', 'Ready'])
     expect(buildDefaultBackendStepNames(t)).toHaveLength(9)
+  })
+
+  it('maps standard k8s deploy backend steps to portal stages', () => {
+    const mapping = buildDeployProgressStepMapping(K8S_DEPLOY_BACKEND_STEP_NAMES, t)
+
+    expect(mapping.directMapping).toBe(false)
+    expect(mapping.stepNames).toEqual(['Preflight', 'Provision', 'Deploy', 'Ready'])
+    expect(backendStepToPortalIndex(9, mapping.directMapping)).toBe(3)
+  })
+
+  it('appends post-ready steps to standard k8s deploy stages', () => {
+    const mapping = buildDeployProgressStepMapping([...K8S_DEPLOY_BACKEND_STEP_NAMES, '同步 LLM 配置'], t)
+
+    expect(mapping.directMapping).toBe(false)
+    expect(mapping.stepNames).toEqual(['Preflight', 'Provision', 'Deploy', 'Ready', '同步 LLM 配置'])
+    expect(backendStepToPortalIndex(10, mapping.directMapping)).toBe(4)
+  })
+
+  it('keeps rebuild and restore steps as direct backend mapping', () => {
+    const mapping = buildDeployProgressStepMapping(REBUILD_STEPS, t)
+
+    expect(mapping.directMapping).toBe(true)
+    expect(mapping.stepNames).toEqual(REBUILD_STEPS)
+    expect(backendStepToPortalIndex(9, mapping.directMapping)).toBe(8)
+  })
+
+  it('maps localized fallback deploy steps to portal stages', () => {
+    const mapping = buildDeployProgressStepMapping(buildDefaultBackendStepNames(t), t)
+
+    expect(mapping.directMapping).toBe(false)
+    expect(mapping.stepNames).toEqual(['Preflight', 'Provision', 'Deploy', 'Ready'])
   })
 
   it('sanitizes deployment logs with localized labels', () => {
