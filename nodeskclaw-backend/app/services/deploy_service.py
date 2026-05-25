@@ -610,6 +610,44 @@ async def require_deploy_progress_instance_access(
     return instance_id
 
 
+async def require_deploy_cancel_org_access(
+    deploy_id: str,
+    db: AsyncSession,
+    org_id: str | None,
+) -> str:
+    return await require_deploy_progress_org_access(deploy_id, db, org_id)
+
+
+async def require_deploy_cancel_instance_access(
+    deploy_id: str,
+    db: AsyncSession,
+    user: User,
+) -> str:
+    result = await db.execute(
+        select(DeployRecord.instance_id)
+        .join(Instance, Instance.id == DeployRecord.instance_id)
+        .where(
+            DeployRecord.id == deploy_id,
+            DeployRecord.deleted_at.is_(None),
+            Instance.deleted_at.is_(None),
+        )
+    )
+    instance_id = result.scalar_one_or_none()
+    if instance_id is None:
+        raise NotFoundError("部署记录不存在", "errors.common.not_found")
+
+    from app.models.instance_member import InstanceRole
+    from app.services import instance_member_service
+
+    await instance_member_service.check_instance_access(
+        instance_id,
+        user,
+        InstanceRole.admin,
+        db,
+    )
+    return instance_id
+
+
 async def precheck(req: DeployRequest, db: AsyncSession) -> PrecheckResult:
     """Run pre-deploy checks."""
     items: list[PrecheckItem] = []

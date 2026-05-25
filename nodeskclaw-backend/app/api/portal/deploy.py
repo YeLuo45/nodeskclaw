@@ -88,10 +88,16 @@ async def deploy(
 @router.post("/{deploy_id}/cancel", response_model=ApiResponse[dict])
 async def cancel_deploy_endpoint(
     deploy_id: str,
-    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await deploy_service.require_deploy_cancel_instance_access(
+        deploy_id,
+        db,
+        current_user,
+    )
     result = await deploy_service.cancel_deploy(deploy_id)
-    await hooks.emit("operation_audit", action="deploy.cancelled", target_type="instance", target_id=deploy_id, actor_id=_current_user.id, org_id=_current_user.current_org_id, details={"deploy_id": deploy_id, "source": "portal"})
+    await hooks.emit("operation_audit", action="deploy.cancelled", target_type="instance", target_id=deploy_id, actor_id=current_user.id, org_id=current_user.current_org_id, details={"deploy_id": deploy_id, "source": "portal"})
     logger.info("取消部署: deploy_id=%s, result=%s", deploy_id, result)
     return ApiResponse(data={"deploy_id": deploy_id, "message": result})
 
