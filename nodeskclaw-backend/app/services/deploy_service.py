@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+import os
 import re as _re
 import json as _json
 import secrets as _secrets
@@ -34,6 +35,7 @@ from app.services.k8s.resource_builder import (
     build_ingress,
     build_labels,
     build_network_policy,
+    build_opaque_secret,
     build_pvc,
     build_resource_quota,
     build_service,
@@ -123,13 +125,98 @@ def _collect_secret_env_refs(agent_bundle_manifest: dict | None) -> list[dict]:
         env_name = ref.get("env") or ref.get("env_name")
         secret_name = ref.get("secret_name") or ref.get("secretName")
         secret_key = ref.get("key") or ref.get("secret_key") or ref.get("secretKey")
+        token_ref = ref.get("token_ref") or ref.get("tokenRef")
+        if token_ref and not (secret_name and secret_key):
+            parts = str(token_ref).split("/", 1)
+            if len(parts) == 2 and all(part.strip() for part in parts):
+                secret_name = secret_name or parts[0].strip()
+                secret_key = secret_key or parts[1].strip()
         if env_name and secret_name and secret_key:
+            source = ref.get("source") if isinstance(ref.get("source"), dict) else {}
+            source_env = ref.get("source_env") or ref.get("sourceEnv") or source.get("env")
             collected.append({
                 "env": str(env_name),
                 "secret_name": str(secret_name),
                 "key": str(secret_key),
+                "source_env": str(source_env) if source_env else None,
+                "required": ref.get("required", True) is not False,
             })
     return collected
+
+
+async def _read_k8s_secret(k8s, namespace: str, secret_name: str):
+    try:
+        return await k8s.core.read_namespaced_secret(secret_name, namespace)
+    except Exception as exc:
+        if getattr(exc, "status", None) == 404:
+            return None
+        raise
+
+
+def _secret_has_key(secret, key: str) -> bool:
+    data = getattr(secret, "data", None) or {}
+    string_data = getattr(secret, "string_data", None) or {}
+    return key in data or key in string_data
+
+
+async def _ensure_agent_bundle_secret_refs(
+    k8s,
+    namespace: str,
+    secret_env_refs: list[dict] | None,
+    labels: dict,
+) -> None:
+    if not secret_env_refs:
+        return
+
+    materialized: dict[str, dict[str, str]] = {}
+    unresolved: list[dict] = []
+    for ref in secret_env_refs:
+        secret_name = ref.get("secret_name")
+        secret_key = ref.get("key")
+        source_env = ref.get("source_env")
+        if not secret_name or not secret_key:
+            continue
+
+        if source_env:
+            value = os.environ.get(str(source_env))
+            if value:
+                materialized.setdefault(str(secret_name), {})[str(secret_key)] = value
+                continue
+        if ref.get("required", True):
+            unresolved.append(ref)
+
+    for secret_name, values in materialized.items():
+        secret = build_opaque_secret(secret_name, namespace, values, labels)
+        await k8s.apply(
+            k8s.core.create_namespaced_secret,
+            k8s.core.patch_namespaced_secret,
+            namespace,
+            secret_name,
+            secret,
+        )
+
+    checked: dict[str, object | None] = {}
+    for ref in unresolved:
+        secret_name = str(ref.get("secret_name"))
+        secret_key = str(ref.get("key"))
+        cache_key = secret_name
+        if cache_key not in checked:
+            checked[cache_key] = await _read_k8s_secret(k8s, namespace, secret_name)
+        secret = checked[cache_key]
+        if secret is None:
+            source_hint = f"，或在平台环境变量 {ref.get('source_env')} 中提供" if ref.get("source_env") else ""
+            raise BadRequestError(
+                message=(
+                    f"AI 员工模板缺少鉴权 Secret: {namespace}/{secret_name} "
+                    f"key={secret_key}{source_hint}"
+                ),
+                message_key="errors.template.missing_auth_secret",
+            )
+        if not _secret_has_key(secret, secret_key):
+            raise BadRequestError(
+                message=f"AI 员工模板鉴权 Secret 缺少 key: {namespace}/{secret_name} key={secret_key}",
+                message_key="errors.template.missing_auth_secret_key",
+            )
 
 
 async def _restore_agent_bundle_with_retry(
@@ -1374,6 +1461,8 @@ async def _execute_deploy_inner(ctx, async_session_factory, get_config, total, s
 
             # Step 3: 创建 ConfigMap
             _publish(3, steps[2])
+            secret_env_refs = (ctx.advanced_config or {}).get("secret_env_refs") if ctx.advanced_config else None
+            await _ensure_agent_bundle_secret_refs(k8s, ctx.namespace, secret_env_refs, labels)
             if ctx.env_vars:
                 cm = build_configmap(f"{ctx.name}-config", ctx.namespace, ctx.env_vars, labels)
                 await k8s.create_or_skip(k8s.core.create_namespaced_config_map, ctx.namespace, cm)

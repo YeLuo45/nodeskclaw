@@ -146,6 +146,57 @@ def _validate_no_plaintext_secret(config: dict[str, Any]) -> None:
             )
 
 
+def _validate_secret_refs(config: dict[str, Any]) -> list[dict[str, Any]]:
+    refs = config.get("secretRefs") or config.get("secret_refs") or []
+    if refs in (None, ""):
+        return []
+    if not isinstance(refs, list):
+        raise BadRequestError("config.secretRefs 必须是数组")
+
+    normalized: list[dict[str, Any]] = []
+    for index, ref in enumerate(refs):
+        if not isinstance(ref, dict):
+            raise BadRequestError(f"config.secretRefs[{index}] 必须是对象")
+        forbidden = [
+            key for key in ref
+            if _is_secret_key(str(key)) and key not in {
+                "secretName", "secret_name", "secretKey", "secret_key",
+                "tokenRef", "token_ref",
+            }
+        ]
+        if forbidden:
+            raise BadRequestError(
+                f"config.secretRefs[{index}] 包含疑似明文密钥字段: {', '.join(sorted(forbidden))}",
+            )
+
+        env_name = ref.get("env") or ref.get("env_name")
+        secret_name = ref.get("secretName") or ref.get("secret_name")
+        secret_key = ref.get("key") or ref.get("secretKey") or ref.get("secret_key")
+        token_ref = ref.get("tokenRef") or ref.get("token_ref")
+        if token_ref and not (secret_name and secret_key):
+            parts = str(token_ref).split("/", 1)
+            if len(parts) == 2 and all(part.strip() for part in parts):
+                secret_name = secret_name or parts[0].strip()
+                secret_key = secret_key or parts[1].strip()
+        if not env_name or not secret_name or not secret_key:
+            raise BadRequestError(
+                f"config.secretRefs[{index}] 必须声明 env、secretName/tokenRef 和 key",
+            )
+        source = ref.get("source") if isinstance(ref.get("source"), dict) else {}
+        source_env = ref.get("sourceEnv") or ref.get("source_env") or source.get("env")
+        item = dict(ref)
+        item["env"] = str(env_name)
+        item["secretName"] = str(secret_name)
+        item["key"] = str(secret_key)
+        if token_ref:
+            item["tokenRef"] = str(token_ref)
+        if source_env:
+            item["sourceEnv"] = str(source_env)
+        item["required"] = ref.get("required", True) is not False
+        normalized.append(item)
+    return normalized
+
+
 def _load_files(root: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     total = 0
@@ -247,6 +298,7 @@ def parse_agent_bundle_dir(bundle_dir: str | Path) -> dict[str, Any]:
 
     config = _parse_json(files["config.json"], "config.json")
     _validate_no_plaintext_secret(config)
+    secret_refs = _validate_secret_refs(config)
 
     skills_root = root / "skills"
     if not skills_root.exists() or not skills_root.is_dir():
@@ -280,8 +332,6 @@ def parse_agent_bundle_dir(bundle_dir: str | Path) -> dict[str, Any]:
     agent_name = str(config.get("name") or _extract_agent_name(files["AGENT.md"], bundle_slug))
     upload_contract = config.get("uploadContract") or config.get("upload_contract")
     resource_recommendation = config.get("resourceRecommendation") or config.get("resource_recommendation")
-    secret_refs = config.get("secretRefs") or config.get("secret_refs") or []
-
     return {
         "schema_version": 1,
         "name": agent_name,
@@ -293,7 +343,7 @@ def parse_agent_bundle_dir(bundle_dir: str | Path) -> dict[str, Any]:
         "files": files,
         "resource_recommendation": resource_recommendation if isinstance(resource_recommendation, dict) else None,
         "upload_contract": upload_contract if isinstance(upload_contract, dict) else None,
-        "secret_refs": secret_refs if isinstance(secret_refs, list) else [],
+        "secret_refs": secret_refs,
     }
 
 

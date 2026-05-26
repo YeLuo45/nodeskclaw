@@ -125,6 +125,16 @@ def build_configmap(
     )
 
 
+def build_opaque_secret(
+    name: str, namespace: str, string_data: dict[str, str], labels: dict
+) -> V1Secret:
+    return V1Secret(
+        metadata=V1ObjectMeta(name=name, namespace=namespace, labels=labels),
+        type="Opaque",
+        string_data=string_data,
+    )
+
+
 def build_pvc(
     name: str,
     namespace: str,

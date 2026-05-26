@@ -366,6 +366,52 @@ def test_bundle_env_vars_filter_secret_values_and_keep_refs() -> None:
     assert "NODESKCLAW_SECRET_REFS" in env
 
 
+def test_oauth_probe_script_calls_mock_broker_with_injected_token() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            auth = self.headers.get("Authorization")
+            token_ref = self.headers.get("X-Token-Ref")
+            ok = auth == "Bearer injected-token" and token_ref == "mock-oauth-token/access_token"
+            body = json.dumps({"ok": ok, "token_ref": token_ref}).encode()
+            self.send_response(200 if ok else 401)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        script = FIXTURES / "p4_oauth_probe_agent" / "skills" / "oauth-probe" / "scripts" / "probe_oauth.py"
+        env = {
+            **os.environ,
+            "DESKCLAW_TRUSTED_OAUTH_EXCHANGE_URL": f"http://127.0.0.1:{server.server_port}/exchange",
+            "OAUTH_TOKEN_REF": "mock-oauth-token/access_token",
+            "OAUTH_ACCESS_TOKEN": "injected-token",
+        }
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+            timeout=10,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["status"] == 200
+    assert payload["token_ref"] == "mock-oauth-token/access_token"
+    assert payload["broker"]["ok"] is True
+
+
 def test_external_service_probe_script_calls_configured_service() -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -427,6 +473,7 @@ def test_secret_env_refs_are_injected_as_k8s_secret_refs_not_configmap_data() ->
     env_by_name = {item.name: item for item in deployment.spec.template.spec.containers[0].env}
     assert configmap.data == {"VISIBLE": "1"}
     assert "OAUTH_ACCESS_TOKEN" not in configmap.data
+    assert refs[0]["source_env"] == "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN"
     assert env_by_name["OAUTH_ACCESS_TOKEN"].value_from.secret_key_ref.name == "mock-oauth-token"
     assert env_by_name["OAUTH_ACCESS_TOKEN"].value_from.secret_key_ref.key == "access_token"
 
