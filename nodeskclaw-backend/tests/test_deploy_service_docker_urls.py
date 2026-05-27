@@ -103,106 +103,6 @@ def test_require_supported_runtime_rejects_removed_nanobot_runtime() -> None:
     assert "nanobot" in exc_info.value.message
 
 
-@pytest.mark.asyncio
-async def test_agent_bundle_secret_refs_materialize_from_backend_env(monkeypatch) -> None:
-    applied = []
-
-    class FakeCore:
-        async def create_namespaced_secret(self, *_args, **_kwargs):
-            return None
-
-        async def patch_namespaced_secret(self, *_args, **_kwargs):
-            return None
-
-    class FakeK8s:
-        core = FakeCore()
-
-        async def apply(self, _create_fn, _patch_fn, namespace, name, body):
-            applied.append((namespace, name, body))
-
-    monkeypatch.setenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", "mock-access-token")
-
-    await _ensure_agent_bundle_secret_refs(
-        FakeK8s(),
-        "agent-ns",
-        [{
-            "env": "OAUTH_ACCESS_TOKEN",
-            "secret_name": "mock-oauth-token",
-            "key": "access_token",
-            "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
-            "required": True,
-        }],
-        {"app.kubernetes.io/managed-by": "nodeskclaw"},
-    )
-
-    assert len(applied) == 1
-    namespace, name, secret = applied[0]
-    assert namespace == "agent-ns"
-    assert name == "mock-oauth-token"
-    assert secret.string_data == {"access_token": "mock-access-token"}
-
-
-@pytest.mark.asyncio
-async def test_agent_bundle_secret_refs_fail_fast_when_missing(monkeypatch) -> None:
-    class MissingSecret(Exception):
-        status = 404
-
-    class FakeCore:
-        async def read_namespaced_secret(self, *_args, **_kwargs):
-            raise MissingSecret()
-
-    class FakeK8s:
-        core = FakeCore()
-
-        async def apply(self, *_args, **_kwargs):
-            raise AssertionError("should not create a secret without source env value")
-
-    monkeypatch.delenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", raising=False)
-
-    with pytest.raises(BadRequestError) as exc_info:
-        await _ensure_agent_bundle_secret_refs(
-            FakeK8s(),
-            "agent-ns",
-            [{
-                "env": "OAUTH_ACCESS_TOKEN",
-                "secret_name": "mock-oauth-token",
-                "key": "access_token",
-                "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
-                "required": True,
-            }],
-            {},
-        )
-    assert "缺少鉴权 Secret" in exc_info.value.message
-
-
-@pytest.mark.asyncio
-async def test_agent_bundle_secret_refs_accept_existing_secret_key(monkeypatch) -> None:
-    class FakeCore:
-        async def read_namespaced_secret(self, *_args, **_kwargs):
-            return SimpleNamespace(data={"access_token": "encoded"})
-
-    class FakeK8s:
-        core = FakeCore()
-
-        async def apply(self, *_args, **_kwargs):
-            raise AssertionError("existing secret should be reused")
-
-    monkeypatch.delenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", raising=False)
-
-    await _ensure_agent_bundle_secret_refs(
-        FakeK8s(),
-        "agent-ns",
-        [{
-            "env": "OAUTH_ACCESS_TOKEN",
-            "secret_name": "mock-oauth-token",
-            "key": "access_token",
-            "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
-            "required": True,
-        }],
-        {},
-    )
-
-
 def test_set_progress_step_names_preserves_existing_config_snapshot() -> None:
     record = SimpleNamespace(config_snapshot=json.dumps({"rollback": {"env": "old"}}))
 
@@ -343,6 +243,147 @@ async def test_cancel_deploy_uses_saved_progress_step_names(monkeypatch) -> None
     assert published[-1]["step"] == len(step_names)
     assert published[-1]["total_steps"] == len(step_names)
     assert published[-1]["step_names"] == step_names
+
+
+@pytest.mark.asyncio
+async def test_cancel_deploy_uses_loaded_instance_provider_for_legacy_steps(monkeypatch) -> None:
+    record = SimpleNamespace(
+        id="deploy-1",
+        instance_id="instance-1",
+        status=DeployStatus.running,
+        message=None,
+        finished_at=None,
+        config_snapshot=None,
+    )
+    instance = SimpleNamespace(
+        id="instance-1",
+        name="demo",
+        status=InstanceStatus.deploying,
+        compute_provider="docker",
+    )
+    session = _SequenceSession([record, instance])
+    published: list[dict] = []
+    finalizers: list[str] = []
+
+    monkeypatch.setattr("app.core.deps.async_session_factory", lambda: session)
+    monkeypatch.setattr(
+        "app.services.instance_service.schedule_instance_deletion_finalizer",
+        lambda instance_id: finalizers.append(instance_id),
+    )
+    monkeypatch.setattr(
+        deploy_service.event_bus,
+        "publish",
+        lambda _topic, payload: published.append(payload),
+    )
+
+    result = await deploy_service.cancel_deploy("deploy-1")
+
+    assert result == "已取消，资源清理已开始"
+    assert session.values == []
+    assert finalizers == ["instance-1"]
+    assert published[-1]["step_names"] == DOCKER_DEPLOY_STEPS
+    assert published[-1]["step"] == len(DOCKER_DEPLOY_STEPS)
+    assert published[-1]["total_steps"] == len(DOCKER_DEPLOY_STEPS)
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_materialize_from_backend_env(monkeypatch) -> None:
+    applied = []
+
+    class FakeCore:
+        async def create_namespaced_secret(self, *_args, **_kwargs):
+            return None
+
+        async def patch_namespaced_secret(self, *_args, **_kwargs):
+            return None
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, _create_fn, _patch_fn, namespace, name, body):
+            applied.append((namespace, name, body))
+
+    monkeypatch.setenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", "mock-access-token")
+
+    await _ensure_agent_bundle_secret_refs(
+        FakeK8s(),
+        "agent-ns",
+        [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
+            "required": True,
+        }],
+        {"app.kubernetes.io/managed-by": "nodeskclaw"},
+    )
+
+    assert len(applied) == 1
+    namespace, name, secret = applied[0]
+    assert namespace == "agent-ns"
+    assert name == "mock-oauth-token"
+    assert secret.string_data == {"access_token": "mock-access-token"}
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_fail_fast_when_missing(monkeypatch) -> None:
+    class MissingSecret(Exception):
+        status = 404
+
+    class FakeCore:
+        async def read_namespaced_secret(self, *_args, **_kwargs):
+            raise MissingSecret()
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, *_args, **_kwargs):
+            raise AssertionError("should not create a secret without source env value")
+
+    monkeypatch.delenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", raising=False)
+
+    with pytest.raises(BadRequestError) as exc_info:
+        await _ensure_agent_bundle_secret_refs(
+            FakeK8s(),
+            "agent-ns",
+            [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "mock-oauth-token",
+                "key": "access_token",
+                "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
+                "required": True,
+            }],
+            {},
+        )
+    assert "缺少鉴权 Secret" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_accept_existing_secret_key(monkeypatch) -> None:
+    class FakeCore:
+        async def read_namespaced_secret(self, *_args, **_kwargs):
+            return SimpleNamespace(data={"access_token": "encoded"})
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, *_args, **_kwargs):
+            raise AssertionError("existing secret should be reused")
+
+    monkeypatch.delenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", raising=False)
+
+    await _ensure_agent_bundle_secret_refs(
+        FakeK8s(),
+        "agent-ns",
+        [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
+            "required": True,
+        }],
+        {},
+    )
 
 
 @pytest.mark.asyncio

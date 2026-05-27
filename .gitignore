@@ -63,6 +63,7 @@ pnpm-debug.log*
 .claude/
 !.claude/CLAUDE.md
 .codex-screenshots/
+.codex/
 
 # ========================
 # 编辑器 & 系统
