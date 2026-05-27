@@ -39,6 +39,7 @@ from app.services import instance_template_service
 from app.services.instance_template_service import (
     _next_agent_bundle_placeholder_name,
     _suggest_agent_bundle_display_name,
+    _template_to_info,
     get_template_agent_bundle_manifest,
     get_template_deploy_env_vars,
     import_agent_bundle_manifest,
@@ -789,3 +790,84 @@ async def test_template_deploy_accessors_reject_legacy_secret_ref_unknown_source
 
     assert "不支持的字段: source" in manifest_exc.value.message
     assert "不支持的字段: source" in env_exc.value.message
+
+
+def _template_info_model(
+    manifest: dict,
+    *,
+    secret_refs: list[dict] | None = None,
+    template_type: str = InstanceTemplateType.agent_bundle.value,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id="tpl-1",
+        name="Template",
+        slug="template",
+        description=None,
+        short_description=None,
+        icon=None,
+        gene_slugs="[]",
+        template_type=template_type,
+        agent_bundle_manifest=json.dumps(manifest, ensure_ascii=False),
+        resource_recommendation=None,
+        upload_contract=None,
+        secret_refs=json.dumps(secret_refs or [], ensure_ascii=False),
+        bundle_storage_key=None,
+        source_instance_id=None,
+        is_published=True,
+        is_featured=False,
+        use_count=0,
+        created_by=None,
+        org_id="org-1",
+        created_at=None,
+    )
+
+
+def test_template_info_uses_sanitized_manifest_secret_refs_not_raw_column() -> None:
+    manifest = {
+        "slug": "oauth-agent",
+        "name": "OAuth Agent",
+        "env": {},
+        "secret_refs": [{
+            "env_name": "OAUTH_ACCESS_TOKEN",
+            "token_ref": "mock-oauth-token/access_token",
+            "required": False,
+        }],
+    }
+    raw_column_refs = [{
+        "env": "OAUTH_ACCESS_TOKEN",
+        "secretName": "mock-oauth-token",
+        "key": "access_token",
+        "source": {"value": "plain-token"},
+    }]
+
+    info = _template_to_info(_template_info_model(manifest, secret_refs=raw_column_refs))
+
+    assert info.secret_refs == [{
+        "env": "OAUTH_ACCESS_TOKEN",
+        "secretName": "mock-oauth-token",
+        "key": "access_token",
+        "tokenRef": "mock-oauth-token/access_token",
+        "required": False,
+    }]
+    serialized = json.dumps(info.model_dump(mode="json"), ensure_ascii=False)
+    assert "plain-token" not in serialized
+    assert '"source":' not in serialized
+
+
+def test_template_info_rejects_legacy_manifest_secret_ref_unknown_source() -> None:
+    manifest = {
+        "slug": "legacy-oauth-agent",
+        "name": "Legacy OAuth Agent",
+        "env": {},
+        "secret_refs": [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secretName": "mock-oauth-token",
+            "key": "access_token",
+            "source": {"value": "plain-token"},
+        }],
+    }
+
+    with pytest.raises(BadRequestError) as exc:
+        _template_to_info(_template_info_model(manifest))
+
+    assert "不支持的字段: source" in exc.value.message

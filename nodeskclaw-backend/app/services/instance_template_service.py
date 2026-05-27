@@ -83,16 +83,6 @@ def _parse_json_obj(raw: str | None) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _parse_json_list(raw: str | None) -> list:
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return []
-    return data if isinstance(data, list) else []
-
-
 def _clean_template_display_name(value: str | None) -> str | None:
     cleaned = str(value or "").strip()
     return cleaned[:128] if cleaned else None
@@ -240,6 +230,17 @@ async def _soft_delete_template_items(db: AsyncSession, template_id: str) -> Non
         item.soft_delete()
 
 
+def _is_agent_bundle_template(tpl: InstanceTemplate) -> bool:
+    return tpl.template_type in (InstanceTemplateType.agent_bundle, InstanceTemplateType.agent_bundle.value)
+
+
+def _template_agent_bundle_manifest(tpl: InstanceTemplate) -> dict[str, Any] | None:
+    manifest = _parse_json_obj(tpl.agent_bundle_manifest)
+    if not _is_agent_bundle_template(tpl):
+        return manifest
+    return sanitize_agent_bundle_manifest(manifest)
+
+
 def _template_to_info(
     tpl: InstanceTemplate,
     genes: list[GeneRef] | None = None,
@@ -248,6 +249,7 @@ def _template_to_info(
     items = item_refs or []
     gene_slugs_from_items = [r.slug for r in items if r.type == "gene"]
     legacy_slugs = gene_slugs_from_items if items else _parse_gene_slugs(tpl.gene_slugs)
+    agent_bundle_manifest = _template_agent_bundle_manifest(tpl)
 
     return InstanceTemplateInfo(
         id=tpl.id,
@@ -260,10 +262,10 @@ def _template_to_info(
         genes=genes or [],
         items=items,
         template_type=tpl.template_type or InstanceTemplateType.basic,
-        agent_bundle=summarize_agent_bundle_manifest(_parse_json_obj(tpl.agent_bundle_manifest)),
+        agent_bundle=summarize_agent_bundle_manifest(agent_bundle_manifest),
         resource_recommendation=_parse_json_obj(tpl.resource_recommendation),
         upload_contract=_parse_json_obj(tpl.upload_contract),
-        secret_refs=_parse_json_list(tpl.secret_refs),
+        secret_refs=(agent_bundle_manifest or {}).get("secret_refs") or [],
         bundle_storage_key=tpl.bundle_storage_key,
         source_instance_id=tpl.source_instance_id,
         is_published=tpl.is_published,
