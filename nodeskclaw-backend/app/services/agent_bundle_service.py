@@ -267,6 +267,15 @@ def _validate_secret_refs(config: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def sanitize_agent_bundle_manifest(manifest: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not manifest:
+        return manifest
+    sanitized = dict(manifest)
+    sanitized["secret_refs"] = _validate_secret_refs(manifest)
+    sanitized.pop("secretRefs", None)
+    return sanitized
+
+
 def _load_files(root: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     total = 0
@@ -503,6 +512,9 @@ def build_bundle_env_vars(
     template_slug: str,
     instance_id: str | None = None,
 ) -> dict[str, str]:
+    if not manifest:
+        return {}
+    manifest = sanitize_agent_bundle_manifest(manifest)
     if not manifest:
         return {}
     env: dict[str, str] = {}

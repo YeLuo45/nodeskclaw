@@ -28,6 +28,7 @@ from app.services.agent_bundle_service import (
     build_bundle_env_vars,
     normalize_bundle_slug,
     parse_agent_bundle_dir,
+    sanitize_agent_bundle_manifest,
     summarize_agent_bundle_manifest,
 )
 
@@ -372,7 +373,7 @@ async def get_template_agent_bundle_manifest(
     tpl = await _get_template_model(db, template_id, org_id)
     if tpl.template_type != InstanceTemplateType.agent_bundle:
         return None
-    return _parse_json_obj(tpl.agent_bundle_manifest)
+    return sanitize_agent_bundle_manifest(_parse_json_obj(tpl.agent_bundle_manifest))
 
 
 async def get_template_deploy_env_vars(
@@ -385,7 +386,7 @@ async def get_template_deploy_env_vars(
     tpl = await _get_template_model(db, template_id, org_id)
     if tpl.template_type != InstanceTemplateType.agent_bundle:
         return {}
-    manifest = _parse_json_obj(tpl.agent_bundle_manifest)
+    manifest = sanitize_agent_bundle_manifest(_parse_json_obj(tpl.agent_bundle_manifest))
     return build_bundle_env_vars(manifest, tpl.slug, instance_id=instance_id)
 
 

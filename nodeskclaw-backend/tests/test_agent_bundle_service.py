@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.exceptions import BadRequestError
 from app.api.instance_templates import _read_upload_file_limited
 from app.models.gene import ContentVisibility, Gene, GeneSource
+from app.models.instance_template import InstanceTemplateType
 from app.models.organization import Organization
 from app.models.user import User
 from app.services.agent_bundle_service import (
@@ -30,12 +31,16 @@ from app.services.agent_bundle_service import (
     parse_agent_bundle_dir,
     parse_agent_bundle_zip,
     restore_agent_bundle,
+    sanitize_agent_bundle_manifest,
     summarize_agent_bundle_manifest,
 )
 from app.services.deploy_service import _collect_secret_env_refs
+from app.services import instance_template_service
 from app.services.instance_template_service import (
     _next_agent_bundle_placeholder_name,
     _suggest_agent_bundle_display_name,
+    get_template_agent_bundle_manifest,
+    get_template_deploy_env_vars,
     import_agent_bundle_manifest,
 )
 from app.services.k8s.resource_builder import build_configmap, build_deployment, build_labels
@@ -394,6 +399,64 @@ def test_parse_agent_bundle_zip_normalizes_token_ref_only_secret_refs() -> None:
     }]
 
 
+def test_sanitize_agent_bundle_manifest_rejects_legacy_secret_ref_unknown_source() -> None:
+    manifest = {
+        "slug": "legacy-oauth-agent",
+        "env": {},
+        "secret_refs": [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secretName": "mock-oauth-token",
+            "key": "access_token",
+            "source": {"value": "plain-token"},
+        }],
+    }
+
+    with pytest.raises(BadRequestError) as exc:
+        sanitize_agent_bundle_manifest(manifest)
+
+    assert "不支持的字段: source" in exc.value.message
+
+
+def test_build_bundle_env_vars_rejects_legacy_secret_ref_unknown_source() -> None:
+    manifest = {
+        "slug": "legacy-oauth-agent",
+        "env": {},
+        "secret_refs": [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secretName": "mock-oauth-token",
+            "key": "access_token",
+            "source": {"value": "plain-token"},
+        }],
+    }
+
+    with pytest.raises(BadRequestError) as exc:
+        build_bundle_env_vars(manifest, "legacy-oauth-agent")
+
+    assert "不支持的字段: source" in exc.value.message
+
+
+def test_build_bundle_env_vars_normalizes_legacy_secret_ref_aliases() -> None:
+    manifest = {
+        "slug": "legacy-oauth-agent",
+        "env": {},
+        "secret_refs": [{
+            "env_name": "OAUTH_ACCESS_TOKEN",
+            "token_ref": "mock-oauth-token/access_token",
+            "required": False,
+        }],
+    }
+
+    env = build_bundle_env_vars(manifest, "legacy-oauth-agent")
+
+    assert json.loads(env["NODESKCLAW_SECRET_REFS"]) == [{
+        "env": "OAUTH_ACCESS_TOKEN",
+        "secretName": "mock-oauth-token",
+        "key": "access_token",
+        "tokenRef": "mock-oauth-token/access_token",
+        "required": False,
+    }]
+
+
 def test_parse_agent_bundle_zip_rejects_duplicate_paths() -> None:
     with pytest.warns(UserWarning, match="Duplicate name"):
         data = make_base_agent_bundle_zip([("docs/dup.txt", "one"), ("docs/dup.txt", "two")])
@@ -693,3 +756,36 @@ async def test_import_agent_bundle_creates_private_template_and_genes(require_te
         assert all(g.source == GeneSource.agent for g in genes)
         assert all(g.visibility == ContentVisibility.org_private for g in genes)
         assert all(g.is_published is False for g in genes)
+
+
+@pytest.mark.asyncio
+async def test_template_deploy_accessors_reject_legacy_secret_ref_unknown_source(monkeypatch) -> None:
+    suffix = uuid4().hex[:8]
+    manifest = {
+        "slug": f"legacy-oauth-agent-{suffix}",
+        "name": "Legacy OAuth Agent",
+        "env": {},
+        "secret_refs": [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secretName": "mock-oauth-token",
+            "key": "access_token",
+            "source": {"value": "plain-token"},
+        }],
+    }
+
+    async def fake_get_template_model(*_args, **_kwargs):
+        return SimpleNamespace(
+            slug=f"legacy-oauth-agent-{suffix}",
+            template_type=InstanceTemplateType.agent_bundle,
+            agent_bundle_manifest=json.dumps(manifest, ensure_ascii=False),
+        )
+
+    monkeypatch.setattr(instance_template_service, "_get_template_model", fake_get_template_model)
+
+    with pytest.raises(BadRequestError) as manifest_exc:
+        await get_template_agent_bundle_manifest(SimpleNamespace(), "tpl-1", "org-1")
+    with pytest.raises(BadRequestError) as env_exc:
+        await get_template_deploy_env_vars(SimpleNamespace(), "tpl-1", "org-1")
+
+    assert "不支持的字段: source" in manifest_exc.value.message
+    assert "不支持的字段: source" in env_exc.value.message
