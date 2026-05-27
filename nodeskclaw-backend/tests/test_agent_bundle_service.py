@@ -357,6 +357,41 @@ def test_parse_agent_bundle_zip_rejects_secret_ref_unknown_source() -> None:
     assert "不支持的字段: source" in exc.value.message
 
 
+@pytest.mark.parametrize("field_name", ["secretRefs", "secret_refs"])
+def test_parse_agent_bundle_zip_rejects_non_array_secret_refs(field_name: str) -> None:
+    data = make_agent_bundle_zip_with_config({
+        "name": "Q",
+        "slug": "q",
+        "model": "mock/q",
+        field_name: {},
+    })
+
+    with pytest.raises(BadRequestError) as exc:
+        parse_agent_bundle_zip("bundle.zip", data)
+
+    assert "config.secretRefs 必须是数组" in exc.value.message
+
+
+def test_parse_agent_bundle_zip_rejects_duplicate_secret_ref_fields() -> None:
+    data = make_agent_bundle_zip_with_config({
+        "name": "Q",
+        "slug": "q",
+        "model": "mock/q",
+        "secretRefs": [],
+        "secret_refs": [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secretName": "mock-oauth-token",
+            "key": "access_token",
+            "source": {"value": "plain-token"},
+        }],
+    })
+
+    with pytest.raises(BadRequestError) as exc:
+        parse_agent_bundle_zip("bundle.zip", data)
+
+    assert "不能同时声明" in exc.value.message
+
+
 @pytest.mark.parametrize(
     "secret_refs, message",
     [

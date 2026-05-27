@@ -179,10 +179,19 @@ def _parse_secret_ref_token_ref(token_ref: Any, index: int) -> tuple[str, str]:
 
 
 def _validate_secret_refs(config: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = config.get("secretRefs") or config.get("secret_refs") or []
-    if refs in (None, ""):
+    refs = config.get("secretRefs")
+    legacy_refs = config.get("secret_refs")
+    has_refs = "secretRefs" in config and refs not in (None, "")
+    has_legacy_refs = "secret_refs" in config and legacy_refs not in (None, "")
+    if has_refs and has_legacy_refs:
+        raise BadRequestError("config.secretRefs 和 config.secret_refs 不能同时声明")
+    if has_refs:
+        selected_refs = refs
+    elif has_legacy_refs:
+        selected_refs = legacy_refs
+    else:
         return []
-    if not isinstance(refs, list):
+    if not isinstance(selected_refs, list):
         raise BadRequestError("config.secretRefs 必须是数组")
 
     normalized: list[dict[str, Any]] = []
@@ -195,7 +204,7 @@ def _validate_secret_refs(config: dict[str, Any]) -> list[dict[str, Any]]:
         "sourceEnv", "source_env",
         "required",
     }
-    for index, ref in enumerate(refs):
+    for index, ref in enumerate(selected_refs):
         if not isinstance(ref, dict):
             raise BadRequestError(f"config.secretRefs[{index}] 必须是对象")
         unknown_keys = sorted(str(key) for key in ref if str(key) not in allowed_keys)
