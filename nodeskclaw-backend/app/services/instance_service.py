@@ -117,6 +117,42 @@ def _get_compute_provider(compute_provider: str):
     return spec.provider if spec and spec.provider else None
 
 
+def _parse_advanced_config(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_equivalent(left, right) -> bool:
+    return json.loads(json.dumps(left, sort_keys=True)) == json.loads(json.dumps(right, sort_keys=True))
+
+
+def _merge_reserved_advanced_config(
+    requested_advanced_config: dict,
+    existing_advanced_config: str | None,
+) -> dict:
+    merged = json.loads(json.dumps(requested_advanced_config))
+    existing = _parse_advanced_config(existing_advanced_config)
+    existing_has_refs = "secret_env_refs" in existing
+
+    if "secret_env_refs" in merged:
+        if not existing_has_refs or not _json_equivalent(merged["secret_env_refs"], existing["secret_env_refs"]):
+            raise BadRequestError(
+                message="advanced_config.secret_env_refs 是系统保留字段，不能由实例配置请求直接声明",
+                message_key="errors.template.secret_env_refs_reserved",
+            )
+
+    if existing_has_refs:
+        merged["secret_env_refs"] = existing["secret_env_refs"]
+    else:
+        merged.pop("secret_env_refs", None)
+    return merged
+
+
 def _is_k8s_not_found(exc: Exception) -> bool:
     return getattr(exc, "status", None) == 404
 
@@ -841,6 +877,10 @@ async def save_config(
     Step 1: 仅保存配置变更到 pending_config，不执行 K8s 操作。
     """
     instance = await get_instance(instance_id, db, org_id)
+    advanced_config = (
+        _merge_reserved_advanced_config(req.advanced_config, instance.advanced_config)
+        if req.advanced_config is not None else None
+    )
 
     pending = {
         "image_version": req.image_version,
@@ -850,7 +890,7 @@ async def save_config(
         "mem_limit": req.mem_limit,
         "env_vars": req.env_vars,
         "replicas": req.replicas,
-        "advanced_config": req.advanced_config,
+        "advanced_config": advanced_config,
     }
     # 过滤掉 None 值，仅保留用户确实修改的字段
     pending = {k: v for k, v in pending.items() if v is not None}
@@ -892,6 +932,13 @@ async def update_config(
 ) -> InstanceInfo:
     """兼容旧接口: 直接保存 + 应用（供回滚等场景使用）。"""
     instance = await get_instance(instance_id, db, org_id)
+    if req.advanced_config is not None:
+        req = req.model_copy(update={
+            "advanced_config": _merge_reserved_advanced_config(
+                req.advanced_config,
+                instance.advanced_config,
+            ),
+        })
     return await _execute_config_update(instance, req, user_id, db)
 
 
@@ -917,6 +964,13 @@ async def _execute_config_update(
         "env_vars": instance.env_vars,
         "advanced_config": instance.advanced_config,
     }
+    if req.advanced_config is not None:
+        req = req.model_copy(update={
+            "advanced_config": _merge_reserved_advanced_config(
+                req.advanced_config,
+                instance.advanced_config,
+            ),
+        })
 
     # 应用变更到 DB
     changed = False

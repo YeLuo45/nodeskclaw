@@ -104,6 +104,22 @@ def build_registry_secret(
     )
 
 
+def build_opaque_secret(
+    namespace: str,
+    name: str,
+    *,
+    data: dict[str, str] | None = None,
+    string_data: dict[str, str] | None = None,
+    labels: dict | None = None,
+) -> V1Secret:
+    return V1Secret(
+        metadata=V1ObjectMeta(name=name, namespace=namespace, labels=labels or {}),
+        type="Opaque",
+        data=data or None,
+        string_data=string_data or None,
+    )
+
+
 def _merge_custom_labels(base_labels: dict, custom_labels: dict | None) -> dict:
     """Merge user-provided labels into base labels; reserved prefixes are rejected."""
     if not custom_labels:
@@ -266,13 +282,15 @@ def build_deployment(
             secret_name = ref.get("secret_name") or ref.get("secretName")
             secret_key = ref.get("key") or ref.get("secret_key") or ref.get("secretKey")
             if env_name and secret_name and secret_key:
+                optional = ref.get("required") is False
                 env.append(
                     V1EnvVar(
-                        name=env_name,
+                        name=str(env_name),
                         value_from=V1EnvVarSource(
                             secret_key_ref=V1SecretKeySelector(
-                                name=secret_name,
-                                key=secret_key,
+                                name=str(secret_name),
+                                key=str(secret_key),
+                                optional=optional,
                             )
                         ),
                     )

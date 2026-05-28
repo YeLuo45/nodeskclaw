@@ -6,11 +6,12 @@
     {
       "env": "OAUTH_ACCESS_TOKEN",
       "secretName": "mock-oauth-token",
-      "key": "access_token"
+      "key": "access_token",
+      "tokenRef": "mock-oauth-token/access_token"
     }
   ],
   "env": {
-    "DESKCLAW_TRUSTED_OAUTH_EXCHANGE_URL": "http://mock-oauth-broker.local/exchange",
+    "DESKCLAW_TRUSTED_OAUTH_EXCHANGE_URL": "http://mock-oauth-broker/exchange",
     "OAUTH_TOKEN_REF": "mock-oauth-token/access_token"
   }
 }

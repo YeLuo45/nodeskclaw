@@ -26,11 +26,13 @@ from app.models.deploy_record import DeployAction, DeployRecord, DeployStatus
 from app.models.instance import Instance, InstanceStatus
 from app.models.user import User
 from app.schemas.deploy import DeployProgress, DeployRequest, PrecheckItem, PrecheckResult
+from app.services.agent_bundle_service import SECRET_REF_SOURCE_NAMESPACE_KEY
 from app.services.k8s.event_bus import event_bus
 from app.services.deploy.factory import get_deploy_adapter
 from app.services.k8s.resource_builder import (
     build_configmap,
     build_deployment,
+    build_opaque_secret,
     build_ingress,
     build_labels,
     build_network_policy,
@@ -113,6 +115,11 @@ def _require_supported_runtime(runtime: str) -> None:
 def _collect_secret_env_refs(agent_bundle_manifest: dict | None) -> list[dict]:
     if not agent_bundle_manifest:
         return []
+    source_namespace = agent_bundle_manifest.get(SECRET_REF_SOURCE_NAMESPACE_KEY)
+    if not isinstance(source_namespace, str) or not source_namespace.strip():
+        source_namespace = None
+    else:
+        source_namespace = source_namespace.strip()
     refs = agent_bundle_manifest.get("secret_refs")
     if not isinstance(refs, list):
         return []
@@ -123,13 +130,228 @@ def _collect_secret_env_refs(agent_bundle_manifest: dict | None) -> list[dict]:
         env_name = ref.get("env") or ref.get("env_name")
         secret_name = ref.get("secret_name") or ref.get("secretName")
         secret_key = ref.get("key") or ref.get("secret_key") or ref.get("secretKey")
+        token_ref = ref.get("token_ref") or ref.get("tokenRef")
+        if token_ref and not (secret_name and secret_key):
+            parts = str(token_ref).split("/", 1)
+            if len(parts) == 2 and all(part.strip() for part in parts):
+                secret_name = secret_name or parts[0].strip()
+                secret_key = secret_key or parts[1].strip()
         if env_name and secret_name and secret_key:
-            collected.append({
+            item = {
                 "env": str(env_name),
                 "secret_name": str(secret_name),
                 "key": str(secret_key),
-            })
+                "required": ref.get("required", True) is not False,
+            }
+            if source_namespace:
+                item["source_namespace"] = source_namespace
+            collected.append(item)
     return collected
+
+
+def _collect_reserved_secret_env_refs(advanced_config: dict | None) -> list[dict]:
+    if not isinstance(advanced_config, dict) or "secret_env_refs" not in advanced_config:
+        return []
+
+    refs = advanced_config.get("secret_env_refs")
+    if refs is None:
+        return []
+    if not isinstance(refs, list) or any(not isinstance(ref, dict) for ref in refs):
+        raise BadRequestError(
+            message="advanced_config.secret_env_refs 格式无效，无法作为系统保留字段继续部署",
+            message_key="errors.template.secret_env_refs_invalid",
+        )
+    return refs
+
+
+def _secret_env_ref_source_namespace(secret_env_refs: list[dict] | None) -> str | None:
+    source_namespaces = {
+        str(ref.get("source_namespace")).strip()
+        for ref in secret_env_refs or []
+        if isinstance(ref, dict) and str(ref.get("source_namespace") or "").strip()
+    }
+    if len(source_namespaces) == 1:
+        return next(iter(source_namespaces))
+    return None
+
+
+async def _read_k8s_secret(k8s, namespace: str, secret_name: str):
+    try:
+        return await k8s.core.read_namespaced_secret(secret_name, namespace)
+    except Exception as exc:
+        if getattr(exc, "status", None) == 404:
+            return None
+        raise
+
+
+def _secret_has_key(secret, key: str) -> bool:
+    data = getattr(secret, "data", None) or {}
+    string_data = getattr(secret, "string_data", None) or {}
+    return key in data or key in string_data
+
+
+def _secret_key_payload(secret, key: str) -> tuple[str, str] | None:
+    data = getattr(secret, "data", None) or {}
+    if key in data:
+        return "data", data[key]
+    string_data = getattr(secret, "string_data", None) or {}
+    if key in string_data:
+        return "string_data", string_data[key]
+    return None
+
+
+async def _ensure_agent_bundle_secret_refs(
+    k8s,
+    namespace: str,
+    secret_env_refs: list[dict] | None,
+    labels: dict,
+    *,
+    source_namespace: str | None = None,
+    copy_missing: bool = False,
+) -> None:
+    if not secret_env_refs:
+        return
+
+    source_namespace = source_namespace or _secret_env_ref_source_namespace(secret_env_refs)
+    unresolved: list[dict] = []
+    for ref in secret_env_refs:
+        secret_name = ref.get("secret_name")
+        secret_key = ref.get("key")
+        if not secret_name or not secret_key:
+            continue
+
+        if ref.get("required", True):
+            unresolved.append(ref)
+
+    checked: dict[str, object | None] = {}
+    source_checked: dict[str, object | None] = {}
+    copy_keys: dict[str, set[str]] = {}
+    effective_source_namespace = source_namespace if source_namespace != namespace else None
+    for ref in unresolved:
+        secret_name = str(ref.get("secret_name"))
+        secret_key = str(ref.get("key"))
+        cache_key = secret_name
+        if cache_key not in checked:
+            checked[cache_key] = await _read_k8s_secret(k8s, namespace, secret_name)
+        secret = checked[cache_key]
+        if secret is not None and _secret_has_key(secret, secret_key):
+            continue
+
+        source_secret = None
+        if effective_source_namespace:
+            if cache_key not in source_checked:
+                source_checked[cache_key] = await _read_k8s_secret(
+                    k8s, effective_source_namespace, secret_name,
+                )
+            source_secret = source_checked[cache_key]
+        if source_secret is not None and _secret_has_key(source_secret, secret_key):
+            if copy_missing:
+                copy_keys.setdefault(secret_name, set()).add(secret_key)
+            continue
+
+        if secret is None:
+            source_hint = (
+                f"，且平台命名空间 {effective_source_namespace}/{secret_name} 中也不存在可复制的 key"
+                if effective_source_namespace else ""
+            )
+            raise BadRequestError(
+                message=(
+                    f"AI 员工模板缺少鉴权 Secret: {namespace}/{secret_name} "
+                    f"key={secret_key}{source_hint}"
+                ),
+                message_key="errors.template.missing_auth_secret",
+            )
+        source_hint = (
+            f"，且平台命名空间 {effective_source_namespace}/{secret_name} 中也缺少该 key"
+            if effective_source_namespace else ""
+        )
+        raise BadRequestError(
+            message=f"AI 员工模板鉴权 Secret 缺少 key: {namespace}/{secret_name} key={secret_key}{source_hint}",
+            message_key="errors.template.missing_auth_secret_key",
+        )
+
+    if not copy_missing:
+        return
+
+    for secret_name, keys in copy_keys.items():
+        source_secret = source_checked.get(secret_name)
+        data: dict[str, str] = {}
+        string_data: dict[str, str] = {}
+        for key in sorted(keys):
+            payload = _secret_key_payload(source_secret, key)
+            if payload is None:
+                continue
+            payload_type, value = payload
+            if payload_type == "data":
+                data[key] = value
+            else:
+                string_data[key] = value
+        if not data and not string_data:
+            continue
+        secret = build_opaque_secret(
+            namespace,
+            secret_name,
+            data=data,
+            string_data=string_data,
+            labels=labels,
+        )
+        if hasattr(k8s, "apply") and hasattr(k8s.core, "patch_namespaced_secret"):
+            await k8s.apply(
+                k8s.core.create_namespaced_secret,
+                k8s.core.patch_namespaced_secret,
+                namespace,
+                secret_name,
+                secret,
+            )
+        else:
+            await k8s.create_or_skip(k8s.core.create_namespaced_secret, namespace, secret)
+
+
+def _required_secret_env_refs(secret_env_refs: list[dict] | None) -> list[dict]:
+    return [
+        ref for ref in secret_env_refs or []
+        if isinstance(ref, dict) and ref.get("required", True) is not False
+    ]
+
+
+def _reject_secret_ref_env_var_collisions(
+    env_vars: dict[str, str],
+    secret_env_refs: list[dict] | None,
+) -> None:
+    secret_env_names = {
+        str(ref.get("env") or ref.get("env_name"))
+        for ref in secret_env_refs or []
+        if isinstance(ref, dict) and (ref.get("env") or ref.get("env_name"))
+    }
+    collisions = sorted(secret_env_names.intersection(env_vars.keys()))
+    if collisions:
+        raise BadRequestError(
+            message=(
+                "AI 员工模板鉴权环境变量不能同时写入普通 env_vars: "
+                f"{', '.join(collisions)}"
+            ),
+            message_key="errors.template.secret_env_var_conflict",
+        )
+
+
+def _reject_unsupported_secret_refs_for_provider(
+    compute_provider: str,
+    secret_env_refs: list[dict] | None,
+) -> None:
+    required_refs = _required_secret_env_refs(secret_env_refs)
+    if required_refs and compute_provider != "k8s":
+        raise BadRequestError(
+            message="AI 员工模板鉴权 Secret 当前仅支持 K8s 部署",
+            message_key="errors.template.secret_refs_require_k8s",
+        )
+
+
+def _reject_user_supplied_secret_env_refs(advanced_config: dict | None) -> None:
+    if isinstance(advanced_config, dict) and "secret_env_refs" in advanced_config:
+        raise BadRequestError(
+            message="advanced_config.secret_env_refs 是系统保留字段，不能由部署请求直接声明",
+            message_key="errors.template.secret_env_refs_reserved",
+        )
 
 
 async def _restore_agent_bundle_with_retry(
@@ -776,13 +998,21 @@ class _DeployContext:
 
 
 async def deploy_instance(
-    req: DeployRequest, user: User, db: AsyncSession, org_id: str | None = None
+    req: DeployRequest,
+    user: User,
+    db: AsyncSession,
+    org_id: str | None = None,
+    *,
+    allow_reserved_secret_env_refs: bool = False,
 ) -> str:
     """
     同步阶段：创建 Instance + DeployRecord，立即返回 record.id。
     不执行任何 K8s 操作，由调用方用 asyncio.create_task 启动后台管道。
     """
     _require_supported_runtime(req.runtime)
+    advanced_config = _json.loads(_json.dumps(req.advanced_config)) if req.advanced_config else {}
+    if not allow_reserved_secret_env_refs:
+        _reject_user_supplied_secret_env_refs(advanced_config)
 
     adapter = get_deploy_adapter()
     effective_cluster_id, org = await adapter.resolve_cluster(
@@ -891,6 +1121,28 @@ async def deploy_instance(
         template_agent_bundle_manifest = await get_template_agent_bundle_manifest(db, req.template_id, org_id)
         env_vars.update(await get_template_deploy_env_vars(db, req.template_id, org_id))
 
+    template_secret_env_refs = _collect_secret_env_refs(template_agent_bundle_manifest)
+    reserved_secret_env_refs = (
+        _collect_reserved_secret_env_refs(advanced_config)
+        if allow_reserved_secret_env_refs
+        else []
+    )
+    secret_env_refs_to_validate = [*reserved_secret_env_refs, *template_secret_env_refs]
+    if secret_env_refs_to_validate:
+        _reject_secret_ref_env_var_collisions(env_vars, secret_env_refs_to_validate)
+        _reject_unsupported_secret_refs_for_provider(cluster.compute_provider, secret_env_refs_to_validate)
+        if cluster.compute_provider == "k8s":
+            from app.services.runtime.registries.compute_registry import require_k8s_client
+            k8s = await require_k8s_client(cluster)
+            for refs in (reserved_secret_env_refs, template_secret_env_refs):
+                if refs:
+                    await _ensure_agent_bundle_secret_refs(
+                        k8s,
+                        namespace,
+                        refs,
+                        {},
+                    )
+
     gateway_token = env_vars.get("GATEWAY_TOKEN") or env_vars.get("OPENCLAW_GATEWAY_TOKEN")
     if not gateway_token:
         gateway_token = _secrets.token_hex(24)
@@ -912,11 +1164,9 @@ async def deploy_instance(
     if docker_host_port is not None:
         env_vars["DOCKER_HOST_PORT"] = str(docker_host_port)
 
-    advanced_config = _json.loads(_json.dumps(req.advanced_config)) if req.advanced_config else {}
-    secret_env_refs = _collect_secret_env_refs(template_agent_bundle_manifest)
-    if secret_env_refs:
+    if template_secret_env_refs:
         existing_refs = advanced_config.setdefault("secret_env_refs", [])
-        existing_refs.extend(secret_env_refs)
+        existing_refs.extend(template_secret_env_refs)
 
     # 创建实例记录
     instance = Instance(
@@ -1391,6 +1641,14 @@ async def _execute_deploy_inner(ctx, async_session_factory, get_config, total, s
 
             # Step 3: 创建 ConfigMap
             _publish(3, steps[2])
+            secret_env_refs = (ctx.advanced_config or {}).get("secret_env_refs") if ctx.advanced_config else None
+            await _ensure_agent_bundle_secret_refs(
+                k8s,
+                ctx.namespace,
+                secret_env_refs,
+                labels,
+                copy_missing=True,
+            )
             if ctx.env_vars:
                 cm = build_configmap(f"{ctx.name}-config", ctx.namespace, ctx.env_vars, labels)
                 await k8s.create_or_skip(k8s.core.create_namespaced_config_map, ctx.namespace, cm)
@@ -1853,6 +2111,14 @@ async def execute_rebuild_pipeline(ctx: _DeployContext, *, finalize_success: boo
 
             # ConfigMap
             _publish(3, steps[2])
+            secret_env_refs = (ctx.advanced_config or {}).get("secret_env_refs") if ctx.advanced_config else None
+            await _ensure_agent_bundle_secret_refs(
+                k8s,
+                ctx.namespace,
+                secret_env_refs,
+                labels,
+                copy_missing=True,
+            )
             if ctx.env_vars:
                 cm = build_configmap(f"{ctx.name}-config", ctx.namespace, ctx.env_vars, labels)
                 await k8s.create_or_skip(k8s.core.create_namespaced_config_map, ctx.namespace, cm)

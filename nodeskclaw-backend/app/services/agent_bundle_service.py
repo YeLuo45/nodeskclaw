@@ -39,6 +39,10 @@ SECRET_KEY_MARKERS = (
 )
 SECRET_REF_SUFFIXES = ("_ref", "ref", "reference")
 BUNDLE_REL_PATH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
+SECRET_REF_ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SECRET_REF_SECRET_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+DNS_LABEL_PATTERN = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+SECRET_REF_SOURCE_NAMESPACE_KEY = "_nodeskclaw_secret_ref_source_namespace"
 
 
 def normalize_bundle_slug(value: str) -> str:
@@ -146,6 +150,142 @@ def _validate_no_plaintext_secret(config: dict[str, Any]) -> None:
             )
 
 
+def _validate_secret_ref_secret_name(value: str, field: str) -> str:
+    text = value.strip()
+    labels = text.split(".") if text else []
+    if (
+        not text
+        or len(text) > 253
+        or any(len(label) > 63 or not DNS_LABEL_PATTERN.fullmatch(label) for label in labels)
+    ):
+        raise BadRequestError(f"config.secretRefs.{field} 必须是合法的 K8s Secret 名称")
+    return text
+
+
+def _validate_secret_ref_key(value: str, field: str) -> str:
+    text = value.strip()
+    if not text or len(text) > 253 or not SECRET_REF_SECRET_KEY_PATTERN.fullmatch(text):
+        raise BadRequestError(f"config.secretRefs.{field} 必须是合法的 K8s Secret key")
+    return text
+
+
+def _parse_secret_ref_token_ref(token_ref: Any, index: int) -> tuple[str, str]:
+    raw = str(token_ref).strip()
+    parts = raw.split("/")
+    if len(parts) != 2:
+        raise BadRequestError(f"config.secretRefs[{index}].tokenRef 必须使用 secretName/key 格式")
+    secret_name = _validate_secret_ref_secret_name(parts[0], f"[{index}].tokenRef")
+    secret_key = _validate_secret_ref_key(parts[1], f"[{index}].tokenRef")
+    return secret_name, secret_key
+
+
+def _validate_secret_refs(config: dict[str, Any]) -> list[dict[str, Any]]:
+    refs = config.get("secretRefs")
+    legacy_refs = config.get("secret_refs")
+    has_refs = "secretRefs" in config and refs not in (None, "")
+    has_legacy_refs = "secret_refs" in config and legacy_refs not in (None, "")
+    if has_refs and has_legacy_refs:
+        raise BadRequestError("config.secretRefs 和 config.secret_refs 不能同时声明")
+    if has_refs:
+        selected_refs = refs
+    elif has_legacy_refs:
+        selected_refs = legacy_refs
+    else:
+        return []
+    if not isinstance(selected_refs, list):
+        raise BadRequestError("config.secretRefs 必须是数组")
+
+    normalized: list[dict[str, Any]] = []
+    seen_env_names: set[str] = set()
+    allowed_keys = {
+        "env", "env_name",
+        "secretName", "secret_name",
+        "key", "secretKey", "secret_key",
+        "tokenRef", "token_ref",
+        "sourceEnv", "source_env",
+        "required",
+    }
+    for index, ref in enumerate(selected_refs):
+        if not isinstance(ref, dict):
+            raise BadRequestError(f"config.secretRefs[{index}] 必须是对象")
+        unknown_keys = sorted(str(key) for key in ref if str(key) not in allowed_keys)
+        if unknown_keys:
+            raise BadRequestError(
+                f"config.secretRefs[{index}] 包含不支持的字段: {', '.join(unknown_keys)}",
+            )
+        forbidden = [
+            key for key in ref
+            if _is_secret_key(str(key)) and key not in {
+                "secretName", "secret_name", "secretKey", "secret_key",
+                "tokenRef", "token_ref",
+            }
+        ]
+        if forbidden:
+            raise BadRequestError(
+                f"config.secretRefs[{index}] 包含疑似明文密钥字段: {', '.join(sorted(forbidden))}",
+            )
+
+        env_name = ref.get("env") or ref.get("env_name")
+        secret_name = ref.get("secretName") or ref.get("secret_name")
+        secret_key = ref.get("key") or ref.get("secretKey") or ref.get("secret_key")
+        token_ref = ref.get("tokenRef") or ref.get("token_ref")
+        if not env_name:
+            raise BadRequestError(
+                f"config.secretRefs[{index}] 必须声明 env、secretName/tokenRef 和 key",
+            )
+        if not secret_name or not secret_key:
+            if token_ref:
+                token_secret_name, token_secret_key = _parse_secret_ref_token_ref(token_ref, index)
+                secret_name = secret_name or token_secret_name
+                secret_key = secret_key or token_secret_key
+            else:
+                raise BadRequestError(
+                    f"config.secretRefs[{index}] 必须声明 env、secretName/tokenRef 和 key",
+                )
+
+        env_text = str(env_name).strip()
+        if not SECRET_REF_ENV_NAME_PATTERN.fullmatch(env_text):
+            raise BadRequestError(f"config.secretRefs[{index}].env 必须是合法的环境变量名")
+        if env_text in seen_env_names:
+            raise BadRequestError(f"config.secretRefs[{index}].env 重复: {env_text}")
+        seen_env_names.add(env_text)
+
+        secret_name_text = _validate_secret_ref_secret_name(str(secret_name), f"[{index}].secretName")
+        secret_key_text = _validate_secret_ref_key(str(secret_key), f"[{index}].key")
+        if token_ref:
+            token_secret_name, token_secret_key = _parse_secret_ref_token_ref(token_ref, index)
+            if token_secret_name != secret_name_text or token_secret_key != secret_key_text:
+                raise BadRequestError(
+                    f"config.secretRefs[{index}].tokenRef 必须与 secretName/key 保持一致",
+                )
+        if "sourceEnv" in ref or "source_env" in ref:
+            raise BadRequestError(
+                f"config.secretRefs[{index}] 不允许声明 sourceEnv，请使用预先创建的 K8s Secret/tokenRef",
+            )
+        if "required" in ref and not isinstance(ref["required"], bool):
+            raise BadRequestError(f"config.secretRefs[{index}].required 必须是布尔值")
+        item = {
+            "env": env_text,
+            "secretName": secret_name_text,
+            "key": secret_key_text,
+        }
+        if token_ref:
+            item["tokenRef"] = f"{secret_name_text}/{secret_key_text}"
+        item["required"] = ref.get("required", True) is not False
+        normalized.append(item)
+    return normalized
+
+
+def sanitize_agent_bundle_manifest(manifest: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not manifest:
+        return manifest
+    sanitized = dict(manifest)
+    sanitized["secret_refs"] = _validate_secret_refs(manifest)
+    sanitized.pop("secretRefs", None)
+    sanitized.pop(SECRET_REF_SOURCE_NAMESPACE_KEY, None)
+    return sanitized
+
+
 def _load_files(root: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     total = 0
@@ -247,6 +387,7 @@ def parse_agent_bundle_dir(bundle_dir: str | Path) -> dict[str, Any]:
 
     config = _parse_json(files["config.json"], "config.json")
     _validate_no_plaintext_secret(config)
+    secret_refs = _validate_secret_refs(config)
 
     skills_root = root / "skills"
     if not skills_root.exists() or not skills_root.is_dir():
@@ -280,8 +421,6 @@ def parse_agent_bundle_dir(bundle_dir: str | Path) -> dict[str, Any]:
     agent_name = str(config.get("name") or _extract_agent_name(files["AGENT.md"], bundle_slug))
     upload_contract = config.get("uploadContract") or config.get("upload_contract")
     resource_recommendation = config.get("resourceRecommendation") or config.get("resource_recommendation")
-    secret_refs = config.get("secretRefs") or config.get("secret_refs") or []
-
     return {
         "schema_version": 1,
         "name": agent_name,
@@ -293,7 +432,7 @@ def parse_agent_bundle_dir(bundle_dir: str | Path) -> dict[str, Any]:
         "files": files,
         "resource_recommendation": resource_recommendation if isinstance(resource_recommendation, dict) else None,
         "upload_contract": upload_contract if isinstance(upload_contract, dict) else None,
-        "secret_refs": secret_refs if isinstance(secret_refs, list) else [],
+        "secret_refs": secret_refs,
     }
 
 
@@ -383,6 +522,9 @@ def build_bundle_env_vars(
     template_slug: str,
     instance_id: str | None = None,
 ) -> dict[str, str]:
+    if not manifest:
+        return {}
+    manifest = sanitize_agent_bundle_manifest(manifest)
     if not manifest:
         return {}
     env: dict[str, str] = {}

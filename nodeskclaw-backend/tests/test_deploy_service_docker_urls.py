@@ -8,12 +8,16 @@ from app.models.deploy_record import DeployStatus
 from app.models.instance import InstanceStatus
 from app.schemas.deploy import DeployRequest
 from app.services import deploy_service
+from app.services import instance_service
 from app.services.deploy_service import (
     DEPLOY_STEPS_BASE,
     DOCKER_DEPLOY_STEPS,
     PROGRESS_STEP_NAMES_KEY,
     REBUILD_STEPS,
     _DeployContext,
+    _ensure_agent_bundle_secret_refs,
+    _reject_secret_ref_env_var_collisions,
+    _reject_unsupported_secret_refs_for_provider,
     _require_supported_runtime,
     _restore_agent_bundle_with_retry,
     _rewrite_docker_callback_url,
@@ -100,6 +104,171 @@ def test_require_supported_runtime_rejects_removed_nanobot_runtime() -> None:
     assert exc_info.value.status_code == 400
     assert exc_info.value.message_key == "errors.validation.invalid_runtime"
     assert "nanobot" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_deploy_instance_rejects_user_supplied_secret_env_refs_before_db_access() -> None:
+    class FailingDb:
+        async def execute(self, *_args, **_kwargs):
+            raise AssertionError("db should not be used before rejecting reserved advanced_config")
+
+    req = DeployRequest(
+        cluster_id="cluster-1",
+        name="demo",
+        image_version="latest",
+        advanced_config={
+            "secret_env_refs": [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "platform-oauth-token",
+                "key": "access_token",
+                "required": True,
+            }],
+        },
+    )
+
+    with pytest.raises(BadRequestError) as exc_info:
+        await deploy_service.deploy_instance(
+            req,
+            SimpleNamespace(id="user-1"),
+            FailingDb(),
+            org_id="org-1",
+        )
+
+    assert exc_info.value.message_key == "errors.template.secret_env_refs_reserved"
+    assert "系统保留字段" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_deploy_instance_rejects_reserved_secret_env_refs_on_docker_clone_before_create(monkeypatch) -> None:
+    class FakeAdapter:
+        async def resolve_cluster(self, *_args, **_kwargs):
+            return "cluster-1", SimpleNamespace(id="org-1")
+
+        def build_namespace(self, slug, _org):
+            return f"ns-{slug}"
+
+    class ClusterResult:
+        def scalar_one_or_none(self):
+            return SimpleNamespace(
+                id="cluster-1",
+                compute_provider="docker",
+                proxy_endpoint=None,
+                api_server_url=None,
+            )
+
+    class EmptyScalarRows:
+        def all(self):
+            return []
+
+    class EmptyScalarsResult:
+        def scalars(self):
+            return EmptyScalarRows()
+
+    class EmptyRowsResult:
+        def all(self):
+            return []
+
+    class FakeDb:
+        def __init__(self):
+            self.results = [ClusterResult(), EmptyScalarsResult(), EmptyRowsResult()]
+            self.added = []
+
+        async def execute(self, *_args, **_kwargs):
+            return self.results.pop(0)
+
+        def add(self, value):
+            self.added.append(value)
+            raise AssertionError("instance/deploy records should not be created")
+
+    monkeypatch.setattr(deploy_service, "get_deploy_adapter", lambda: FakeAdapter())
+
+    req = DeployRequest(
+        cluster_id="cluster-1",
+        name="clone-demo",
+        image_version="latest",
+        advanced_config={
+            "secret_env_refs": [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "platform-oauth-token",
+                "key": "access_token",
+                "required": True,
+                "source_namespace": "nodeskclaw-system",
+            }],
+        },
+    )
+    db = FakeDb()
+
+    with pytest.raises(BadRequestError) as exc_info:
+        await deploy_service.deploy_instance(
+            req,
+            SimpleNamespace(id="user-1"),
+            db,
+            org_id="org-1",
+            allow_reserved_secret_env_refs=True,
+        )
+
+    assert exc_info.value.message_key == "errors.template.secret_refs_require_k8s"
+    assert "仅支持 K8s" in exc_info.value.message
+    assert db.added == []
+
+
+def test_instance_config_preserves_internal_secret_env_refs() -> None:
+    secret_refs = [{
+        "env": "OAUTH_ACCESS_TOKEN",
+        "secret_name": "platform-oauth-token",
+        "key": "access_token",
+        "required": True,
+        "source_namespace": "nodeskclaw-system",
+    }]
+    merged = instance_service._merge_reserved_advanced_config(
+        {"network": {"peers": ["peer-1"]}},
+        json.dumps({"secret_env_refs": secret_refs, "network": {"peers": ["old-peer"]}}),
+    )
+
+    assert merged == {
+        "network": {"peers": ["peer-1"]},
+        "secret_env_refs": secret_refs,
+    }
+
+
+def test_instance_config_allows_round_trip_internal_secret_env_refs() -> None:
+    secret_refs = [{
+        "env": "OAUTH_ACCESS_TOKEN",
+        "secret_name": "platform-oauth-token",
+        "key": "access_token",
+        "required": True,
+    }]
+    merged = instance_service._merge_reserved_advanced_config(
+        {"debug": True, "secret_env_refs": secret_refs},
+        json.dumps({"secret_env_refs": secret_refs}),
+    )
+
+    assert merged == {"debug": True, "secret_env_refs": secret_refs}
+
+
+def test_instance_config_rejects_modified_internal_secret_env_refs() -> None:
+    with pytest.raises(BadRequestError) as exc_info:
+        instance_service._merge_reserved_advanced_config(
+            {
+                "secret_env_refs": [{
+                    "env": "OAUTH_ACCESS_TOKEN",
+                    "secret_name": "attacker-guessed-secret",
+                    "key": "access_token",
+                    "required": True,
+                }],
+            },
+            json.dumps({
+                "secret_env_refs": [{
+                    "env": "OAUTH_ACCESS_TOKEN",
+                    "secret_name": "platform-oauth-token",
+                    "key": "access_token",
+                    "required": True,
+                }],
+            }),
+        )
+
+    assert exc_info.value.message_key == "errors.template.secret_env_refs_reserved"
+    assert "系统保留字段" in exc_info.value.message
 
 
 def test_set_progress_step_names_preserves_existing_config_snapshot() -> None:
@@ -283,6 +452,294 @@ async def test_cancel_deploy_uses_loaded_instance_provider_for_legacy_steps(monk
     assert published[-1]["step_names"] == DOCKER_DEPLOY_STEPS
     assert published[-1]["step"] == len(DOCKER_DEPLOY_STEPS)
     assert published[-1]["total_steps"] == len(DOCKER_DEPLOY_STEPS)
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_ignore_backend_source_env(monkeypatch) -> None:
+    applied = []
+
+    class MissingSecret(Exception):
+        status = 404
+
+    class FakeCore:
+        async def read_namespaced_secret(self, *_args, **_kwargs):
+            raise MissingSecret()
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, *_args, **_kwargs):
+            applied.append((_args, _kwargs))
+
+    monkeypatch.setenv("NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN", "mock-access-token")
+
+    with pytest.raises(BadRequestError) as exc_info:
+        await _ensure_agent_bundle_secret_refs(
+            FakeK8s(),
+            "agent-ns",
+            [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "mock-oauth-token",
+                "key": "access_token",
+                "source_env": "NODESKCLAW_TEST_OAUTH_ACCESS_TOKEN",
+                "required": True,
+            }],
+            {"app.kubernetes.io/managed-by": "nodeskclaw"},
+        )
+
+    assert applied == []
+    assert "缺少鉴权 Secret" in exc_info.value.message
+    assert "平台环境变量" not in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_fail_fast_when_missing() -> None:
+    class MissingSecret(Exception):
+        status = 404
+
+    class FakeCore:
+        async def read_namespaced_secret(self, *_args, **_kwargs):
+            raise MissingSecret()
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, *_args, **_kwargs):
+            raise AssertionError("should not create a secret without source env value")
+
+    with pytest.raises(BadRequestError) as exc_info:
+        await _ensure_agent_bundle_secret_refs(
+            FakeK8s(),
+            "agent-ns",
+            [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "mock-oauth-token",
+                "key": "access_token",
+                "required": True,
+            }],
+            {},
+        )
+    assert "缺少鉴权 Secret" in exc_info.value.message
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_do_not_read_platform_without_trusted_source() -> None:
+    reads = []
+
+    class MissingSecret(Exception):
+        status = 404
+
+    class FakeCore:
+        async def read_namespaced_secret(self, secret_name, namespace):
+            reads.append((namespace, secret_name))
+            if namespace == "nodeskclaw-system":
+                return SimpleNamespace(data={"access_token": "encoded"})
+            raise MissingSecret()
+
+    class FakeK8s:
+        core = FakeCore()
+
+    with pytest.raises(BadRequestError):
+        await _ensure_agent_bundle_secret_refs(
+            FakeK8s(),
+            "agent-ns",
+            [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "mock-oauth-token",
+                "key": "access_token",
+                "required": True,
+            }],
+            {},
+        )
+
+    assert reads == [("agent-ns", "mock-oauth-token")]
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_accept_existing_secret_key() -> None:
+    class FakeCore:
+        async def read_namespaced_secret(self, *_args, **_kwargs):
+            return SimpleNamespace(data={"access_token": "encoded"})
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, *_args, **_kwargs):
+            raise AssertionError("existing secret should be reused")
+
+    await _ensure_agent_bundle_secret_refs(
+        FakeK8s(),
+        "agent-ns",
+        [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "required": True,
+        }],
+        {},
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_accept_platform_secret_before_namespace_created() -> None:
+    reads = []
+
+    class MissingSecret(Exception):
+        status = 404
+
+    class FakeCore:
+        async def read_namespaced_secret(self, secret_name, namespace):
+            reads.append((namespace, secret_name))
+            if namespace == "nodeskclaw-system":
+                return SimpleNamespace(data={"access_token": "encoded"})
+            raise MissingSecret()
+
+        async def create_namespaced_secret(self, *_args, **_kwargs):
+            raise AssertionError("preflight should not create target namespace secret")
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def create_or_skip(self, *_args, **_kwargs):
+            raise AssertionError("preflight should not create target namespace secret")
+
+    await _ensure_agent_bundle_secret_refs(
+        FakeK8s(),
+        "agent-ns",
+        [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "required": True,
+            "source_namespace": "nodeskclaw-system",
+        }],
+        {},
+    )
+
+    assert reads == [
+        ("agent-ns", "mock-oauth-token"),
+        ("nodeskclaw-system", "mock-oauth-token"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_copy_platform_secret_after_namespace_created() -> None:
+    created = []
+
+    class MissingSecret(Exception):
+        status = 404
+
+    class FakeCore:
+        async def read_namespaced_secret(self, secret_name, namespace):
+            if namespace == "nodeskclaw-system":
+                return SimpleNamespace(data={
+                    "access_token": "encoded-token",
+                    "refresh_token": "do-not-copy",
+                })
+            raise MissingSecret()
+
+        async def create_namespaced_secret(self, namespace, body):
+            created.append((namespace, body))
+
+        async def patch_namespaced_secret(self, *_args, **_kwargs):
+            raise AssertionError("target secret is missing and should be created")
+
+    class FakeK8s:
+        core = FakeCore()
+
+        async def apply(self, create_fn, _patch_fn, namespace, name, body):
+            assert name == "mock-oauth-token"
+            return await create_fn(namespace, body)
+
+        async def create_or_skip(self, create_fn, *args, **kwargs):
+            return await create_fn(*args, **kwargs)
+
+    await _ensure_agent_bundle_secret_refs(
+        FakeK8s(),
+        "agent-ns",
+        [{
+            "env": "OAUTH_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "required": True,
+            "source_namespace": "nodeskclaw-system",
+        }],
+        {"app.kubernetes.io/managed-by": "nodeskclaw"},
+        copy_missing=True,
+    )
+
+    assert len(created) == 1
+    namespace, body = created[0]
+    assert namespace == "agent-ns"
+    assert body.metadata.name == "mock-oauth-token"
+    assert body.metadata.namespace == "agent-ns"
+    assert body.metadata.labels == {"app.kubernetes.io/managed-by": "nodeskclaw"}
+    assert body.data == {"access_token": "encoded-token"}
+    assert body.string_data is None
+
+
+@pytest.mark.asyncio
+async def test_agent_bundle_secret_refs_skip_optional_missing_secret() -> None:
+    class FakeCore:
+        async def read_namespaced_secret(self, *_args, **_kwargs):
+            raise AssertionError("optional secret refs should not be preflighted")
+
+    class FakeK8s:
+        core = FakeCore()
+
+    await _ensure_agent_bundle_secret_refs(
+        FakeK8s(),
+        "agent-ns",
+        [{
+            "env": "OPTIONAL_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "required": False,
+        }],
+        {},
+    )
+
+
+def test_secret_refs_reject_required_refs_on_non_k8s_provider() -> None:
+    with pytest.raises(BadRequestError) as exc_info:
+        _reject_unsupported_secret_refs_for_provider(
+            "docker",
+            [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "mock-oauth-token",
+                "key": "access_token",
+                "required": True,
+            }],
+        )
+
+    assert "仅支持 K8s" in exc_info.value.message
+
+
+def test_secret_refs_allow_optional_refs_on_non_k8s_provider() -> None:
+    _reject_unsupported_secret_refs_for_provider(
+        "docker",
+        [{
+            "env": "OPTIONAL_ACCESS_TOKEN",
+            "secret_name": "mock-oauth-token",
+            "key": "access_token",
+            "required": False,
+        }],
+    )
+
+
+def test_secret_refs_reject_plain_env_var_collision() -> None:
+    with pytest.raises(BadRequestError) as exc_info:
+        _reject_secret_ref_env_var_collisions(
+            {"OAUTH_ACCESS_TOKEN": "plain-token"},
+            [{
+                "env": "OAUTH_ACCESS_TOKEN",
+                "secret_name": "mock-oauth-token",
+                "key": "access_token",
+                "required": True,
+            }],
+        )
+
+    assert "不能同时写入普通 env_vars" in exc_info.value.message
 
 
 @pytest.mark.asyncio

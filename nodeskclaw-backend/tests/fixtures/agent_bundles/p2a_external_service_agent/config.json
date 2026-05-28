@@ -1,0 +1,9 @@
+{
+  "name": "External Service Probe Agent",
+  "slug": "p2a-external-service-agent",
+  "model": "mock/external",
+  "env": {
+    "EXTERNAL_API_BASE": "https://api.github.com",
+    "EXTERNAL_API_PATH": "/zen"
+  }
+}

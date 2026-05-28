@@ -266,7 +266,13 @@ async def clone_instance(
     )
 
     from app.services.deploy_service import deploy_instance, execute_deploy_pipeline, register_deploy_task
-    deploy_id, ctx = await deploy_instance(deploy_req, user, db, org_id)
+    deploy_id, ctx = await deploy_instance(
+        deploy_req,
+        user,
+        db,
+        org_id,
+        allow_reserved_secret_env_refs=True,
+    )
 
     task = asyncio.create_task(
         _execute_clone_pipeline(ctx, backup.id, deploy_id)

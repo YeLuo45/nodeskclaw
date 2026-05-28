@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.models.base import not_deleted
 from app.models.gene import ContentVisibility, Gene, GeneSource, Genome, InstanceGene
@@ -25,9 +26,11 @@ from app.schemas.instance_template import (
     TemplateItemRef,
 )
 from app.services.agent_bundle_service import (
+    SECRET_REF_SOURCE_NAMESPACE_KEY,
     build_bundle_env_vars,
     normalize_bundle_slug,
     parse_agent_bundle_dir,
+    sanitize_agent_bundle_manifest,
     summarize_agent_bundle_manifest,
 )
 
@@ -80,16 +83,6 @@ def _parse_json_obj(raw: str | None) -> dict[str, Any] | None:
     except (json.JSONDecodeError, TypeError):
         return None
     return data if isinstance(data, dict) else None
-
-
-def _parse_json_list(raw: str | None) -> list:
-    if not raw:
-        return []
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return []
-    return data if isinstance(data, list) else []
 
 
 def _clean_template_display_name(value: str | None) -> str | None:
@@ -239,6 +232,52 @@ async def _soft_delete_template_items(db: AsyncSession, template_id: str) -> Non
         item.soft_delete()
 
 
+def _is_agent_bundle_template(tpl: InstanceTemplate) -> bool:
+    return tpl.template_type in (InstanceTemplateType.agent_bundle, InstanceTemplateType.agent_bundle.value)
+
+
+def _is_trusted_platform_agent_bundle_template(tpl: InstanceTemplate) -> bool:
+    return (
+        _is_agent_bundle_template(tpl)
+        and getattr(tpl, "org_id", None) is None
+        and getattr(tpl, "visibility", None) in (ContentVisibility.public, ContentVisibility.public.value)
+    )
+
+
+def _template_agent_bundle_manifest(
+    tpl: InstanceTemplate,
+    *,
+    include_platform_secret_source: bool = False,
+    allow_invalid_secret_refs: bool = False,
+) -> dict[str, Any] | None:
+    manifest = _parse_json_obj(tpl.agent_bundle_manifest)
+    if not _is_agent_bundle_template(tpl):
+        return manifest
+    try:
+        sanitized = sanitize_agent_bundle_manifest(manifest)
+    except BadRequestError as exc:
+        if not allow_invalid_secret_refs:
+            raise
+        logger.warning(
+            "忽略历史 Agent Bundle 模板中的非法 secretRefs: template_id=%s slug=%s err=%s",
+            getattr(tpl, "id", None),
+            getattr(tpl, "slug", None),
+            exc.message,
+        )
+        sanitized = dict(manifest or {})
+        sanitized.pop("secretRefs", None)
+        sanitized.pop("secret_refs", None)
+        sanitized.pop(SECRET_REF_SOURCE_NAMESPACE_KEY, None)
+    if (
+        sanitized
+        and include_platform_secret_source
+        and _is_trusted_platform_agent_bundle_template(tpl)
+        and sanitized.get("secret_refs")
+    ):
+        sanitized[SECRET_REF_SOURCE_NAMESPACE_KEY] = settings.PLATFORM_NAMESPACE
+    return sanitized
+
+
 def _template_to_info(
     tpl: InstanceTemplate,
     genes: list[GeneRef] | None = None,
@@ -247,6 +286,7 @@ def _template_to_info(
     items = item_refs or []
     gene_slugs_from_items = [r.slug for r in items if r.type == "gene"]
     legacy_slugs = gene_slugs_from_items if items else _parse_gene_slugs(tpl.gene_slugs)
+    agent_bundle_manifest = _template_agent_bundle_manifest(tpl, allow_invalid_secret_refs=True)
 
     return InstanceTemplateInfo(
         id=tpl.id,
@@ -259,10 +299,10 @@ def _template_to_info(
         genes=genes or [],
         items=items,
         template_type=tpl.template_type or InstanceTemplateType.basic,
-        agent_bundle=summarize_agent_bundle_manifest(_parse_json_obj(tpl.agent_bundle_manifest)),
+        agent_bundle=summarize_agent_bundle_manifest(agent_bundle_manifest),
         resource_recommendation=_parse_json_obj(tpl.resource_recommendation),
         upload_contract=_parse_json_obj(tpl.upload_contract),
-        secret_refs=_parse_json_list(tpl.secret_refs),
+        secret_refs=(agent_bundle_manifest or {}).get("secret_refs") or [],
         bundle_storage_key=tpl.bundle_storage_key,
         source_instance_id=tpl.source_instance_id,
         is_published=tpl.is_published,
@@ -372,7 +412,7 @@ async def get_template_agent_bundle_manifest(
     tpl = await _get_template_model(db, template_id, org_id)
     if tpl.template_type != InstanceTemplateType.agent_bundle:
         return None
-    return _parse_json_obj(tpl.agent_bundle_manifest)
+    return _template_agent_bundle_manifest(tpl, include_platform_secret_source=True)
 
 
 async def get_template_deploy_env_vars(
@@ -385,7 +425,7 @@ async def get_template_deploy_env_vars(
     tpl = await _get_template_model(db, template_id, org_id)
     if tpl.template_type != InstanceTemplateType.agent_bundle:
         return {}
-    manifest = _parse_json_obj(tpl.agent_bundle_manifest)
+    manifest = sanitize_agent_bundle_manifest(_parse_json_obj(tpl.agent_bundle_manifest))
     return build_bundle_env_vars(manifest, tpl.slug, instance_id=instance_id)
 
 
