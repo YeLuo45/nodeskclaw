@@ -304,6 +304,13 @@ def _parse_usage_from_response(body: bytes) -> dict:
 
 
 def _parse_usage_from_sse_chunk(line: str) -> dict | None:
+    """Extract usage from a single SSE line.
+
+    Handles both OpenAI (top-level ``usage``) and Anthropic Messages API
+    (``message_start`` with nested ``message.usage``, ``message_delta``
+    with top-level ``usage``).  Returns partial results — the caller is
+    responsible for accumulating across SSE events.
+    """
     if not line.startswith("data: "):
         return None
     payload = line[6:].strip()
@@ -312,13 +319,26 @@ def _parse_usage_from_sse_chunk(line: str) -> dict | None:
     try:
         data = json.loads(payload)
         usage = data.get("usage")
-        if usage and (usage.get("total_tokens") or usage.get("prompt_tokens")):
-            return {
-                "prompt_tokens": usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0) or usage.get("output_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0),
-                "model": data.get("model"),
-            }
+        if not usage and isinstance(data.get("message"), dict):
+            usage = data["message"].get("usage")
+        if not usage:
+            return None
+        prompt = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
+        completion = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
+        total = usage.get("total_tokens", 0)
+        if not (prompt or completion or total):
+            return None
+        result: dict = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        }
+        model = data.get("model")
+        if not model and isinstance(data.get("message"), dict):
+            model = data["message"].get("model")
+        if model:
+            result["model"] = model
+        return result
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
     return None
@@ -1320,7 +1340,11 @@ async def _handle_stream(
             async for line in resp.aiter_lines():
                 parsed = _parse_usage_from_sse_chunk(line)
                 if parsed:
-                    usage_data = parsed
+                    for k, v in parsed.items():
+                        if k == "model":
+                            usage_data[k] = v
+                        elif isinstance(v, int) and v > 0:
+                            usage_data[k] = v
                 if not stream_error:
                     stream_error = _extract_sse_error(line)
                 if line.strip() == "data: [DONE]":
@@ -1334,6 +1358,10 @@ async def _handle_stream(
         finally:
             await resp.aclose()
             latency_ms = int((time.monotonic() - start) * 1000)
+            if usage_data and not usage_data.get("total_tokens"):
+                usage_data["total_tokens"] = (
+                    usage_data.get("prompt_tokens", 0) + usage_data.get("completion_tokens", 0)
+                )
             if stream_error:
                 logger.warning("SSE stream error from %s: %s", ctx.provider, stream_error[:512])
             response_meta = json.dumps(usage_data, ensure_ascii=False) if usage_data else None
