@@ -38,6 +38,7 @@ nodeskclaw-portal/
 │       ├── OrgSettingsGenes.vue    # 默认工作基因配置（org-settings 子视图）
 │       ├── OrgSettingsLlmKeys.vue  # 组织大模型 Key 管理（org-settings 子视图）
 │       ├── OrgSettingsSmtp.vue     # SMTP 邮件配置（org-settings 子视图）
+│       ├── OrgSettingsUpload.vue   # 文件上传配置（org-settings 子视图）
 │       ├── ClusterDetail.vue       # 集群详情（资源概览 + 节点列表 + IngressClass + StorageClass）
 │       ├── GeneMarket.vue          # 基因市场
 │       ├── EnterpriseFiles.vue     # 企业空间 — Agent 列表
@@ -69,12 +70,13 @@ vue-tsc -b       # 类型检查
 | `/settings` | 个人设置 | 用户信息、密码管理 |
 | `/usage` | 用量 | 组织用量统计 |
 | `/gene-market` | 基因市场 | 浏览安装基因 |
-| `/org-settings` | 组织设置 | Tab 布局：集群 + 镜像仓库 + 引擎版本 + 大模型 Key + 默认工作基因 + 邮件配置（仅 org admin） |
+| `/org-settings` | 组织设置 | Tab 布局：集群 + 镜像仓库 + 引擎版本 + 大模型 Key + 默认工作基因 + 网络路由 + 文件上传 + 邮件配置（仅 org admin） |
 | `/org-settings/clusters` | 集群管理 | K8s 集群配置（org-settings 子路由，默认页） |
 | `/org-settings/engine-versions` | 引擎版本 | 引擎版本发布/默认设置/废弃（org-settings 子路由） |
 | `/org-settings/llm-keys` | 大模型 Key | 组织级 LLM API Key 管理（org-settings 子路由） |
 | `/org-settings/genes` | 默认工作基因 | 默认工作基因配置（org-settings 子路由） |
 | `/org-settings/smtp` | 邮件配置 | 组织 SMTP 服务器配置（org-settings 子路由） |
+| `/org-settings/upload` | 文件上传 | 上传限制与安全策略配置（org-settings 子路由） |
 | `/clusters/:id` | 集群详情 | 资源概览、节点列表、IngressClass、StorageClass |
 | `/members` | (重定向) | 重定向到 `/org-settings` |
 | `/enterprise-files` | 企业空间 | Agent 文件浏览（仅 org admin） |
