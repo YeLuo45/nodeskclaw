@@ -799,6 +799,7 @@ const enUS = {
     attachFile: "Attach file",
     fileUploadDisabled: "Object storage not configured for this organization, file upload unavailable",
     fileTooLarge: "File size cannot exceed {size}MB",
+    fileCountExceeded: "Each message can include up to {count} files",
     fileUploading: "Uploading files...",
     fileUploadFailed: "File upload failed",
     downloadFile: "Download file",

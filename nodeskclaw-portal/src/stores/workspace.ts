@@ -259,6 +259,22 @@ export interface FileReference {
   download_url_available?: boolean
 }
 
+interface UploadSessionInfo {
+  session_id: string
+  part_size_bytes: number
+  part_count: number
+}
+
+interface UploadSessionFileResult {
+  source: 'shared_file' | 'large_input'
+  file_id: string
+  display_name: string
+  size: number
+  content_type: string
+  scan_status?: string
+  download_url_available?: boolean
+}
+
 export interface GroupChatMessage {
   id: string
   sender_type: 'user' | 'agent' | 'system'
@@ -414,6 +430,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function uploadSharedFile(workspaceId: string, file: File, parentPath = '/'): Promise<FileReference | null> {
+    const threshold = Number(uploadPolicy.value?.surfaces?.shared_file?.chunked_upload_threshold_bytes || 50 * 1024 * 1024)
+    if (file.size >= threshold) {
+      return await uploadSharedFileBySession(workspaceId, file, parentPath)
+    }
+
     const formData = new FormData()
     formData.append('file', file)
     formData.append('parent_path', parentPath)
@@ -436,6 +457,68 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
     } catch (e) {
       console.error('uploadSharedFile error:', e)
+      return null
+    }
+  }
+
+  async function uploadSharedFileBySession(workspaceId: string, file: File, parentPath = '/'): Promise<FileReference | null> {
+    let sessionId = ''
+    try {
+      const createRes = await api.post(`/workspaces/${workspaceId}/uploads/sessions`, {
+        surface: 'shared_file',
+        filename: file.name,
+        content_type: file.type || 'application/octet-stream',
+        expected_size: file.size,
+        parent_path: parentPath,
+        purpose: 'workspace_shared_file',
+        conflict_strategy: 'keep_both',
+        client_request_id: `${file.name}:${file.size}:${file.lastModified}`,
+      })
+      const session = createRes.data.data as UploadSessionInfo
+      sessionId = session.session_id
+      const uploadedParts: Array<{ part_number: number; size: number; checksum: string; etag: string }> = []
+
+      for (let partNumber = 1; partNumber <= session.part_count; partNumber += 1) {
+        const start = (partNumber - 1) * session.part_size_bytes
+        const end = Math.min(start + session.part_size_bytes, file.size)
+        const blob = file.slice(start, end)
+        const partRes = await api.put(
+          `/workspaces/${workspaceId}/uploads/sessions/${session.session_id}/parts/${partNumber}`,
+          blob,
+          { headers: { 'Content-Type': 'application/octet-stream' } },
+        )
+        const part = partRes.data.data.part
+        uploadedParts.push({
+          part_number: part.part_number,
+          size: part.size,
+          checksum: part.checksum,
+          etag: part.etag,
+        })
+      }
+
+      const completeRes = await api.post(`/workspaces/${workspaceId}/uploads/sessions/${session.session_id}/complete`, {
+        parts: uploadedParts,
+      })
+      const fileResult = completeRes.data.data.file as UploadSessionFileResult
+      return {
+        source: fileResult.source,
+        file_id: fileResult.file_id,
+        display_name: fileResult.display_name,
+        size: fileResult.size,
+        content_type: fileResult.content_type,
+        status: 'available',
+        scan_status: fileResult.scan_status || 'skipped',
+        download_url_available: fileResult.download_url_available !== false,
+      }
+    } catch (e) {
+      if (sessionId) {
+        try {
+          await api.post(`/workspaces/${workspaceId}/uploads/sessions/${sessionId}/cancel`)
+        } catch (cancelError) {
+          console.warn('cancelUploadSession error:', cancelError)
+        }
+      }
+      console.error('uploadSharedFileBySession error:', e)
       return null
     }
   }

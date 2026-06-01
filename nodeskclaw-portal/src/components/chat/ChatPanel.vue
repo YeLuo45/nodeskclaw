@@ -142,12 +142,16 @@ const fileUploading = ref(false)
 
 const DEFAULT_CHAT_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
 const DEFAULT_SHARED_FILE_MAX_BYTES = 200 * 1024 * 1024
+const DEFAULT_CHAT_ATTACHMENT_MAX_COUNT = 5
 const chatAttachmentMaxBytes = computed(() => (
-  store.uploadPolicy?.surfaces?.chat_attachment?.max_bytes as number | undefined
+  store.uploadPolicy?.surfaces?.chat_attachment?.max_file_size_bytes as number | undefined
 ) || DEFAULT_CHAT_ATTACHMENT_MAX_BYTES)
 const sharedFileMaxBytes = computed(() => (
-  store.uploadPolicy?.surfaces?.shared_file?.max_bytes as number | undefined
+  store.uploadPolicy?.surfaces?.shared_file?.max_file_size_bytes as number | undefined
 ) || DEFAULT_SHARED_FILE_MAX_BYTES)
+const chatAttachmentMaxCount = computed(() => (
+  store.uploadPolicy?.surfaces?.chat_attachment?.max_files_per_message as number | undefined
+) || DEFAULT_CHAT_ATTACHMENT_MAX_COUNT)
 
 function triggerFileInput() {
   if (!store.fileUploadEnabled) return
@@ -163,9 +167,16 @@ function handleFileSelect(e: Event) {
 
 function addFiles(files: File[]) {
   for (const f of files) {
+    if (pendingFiles.value.length >= chatAttachmentMaxCount.value) {
+      toast.error(t('chat.fileCountExceeded', { count: chatAttachmentMaxCount.value }))
+      break
+    }
     if (f.size > sharedFileMaxBytes.value) {
       toast.error(t('chat.fileTooLarge', { size: Math.floor(sharedFileMaxBytes.value / (1024 * 1024)) }))
       continue
+    }
+    if (f.size > chatAttachmentMaxBytes.value) {
+      toast.info(t('upload.hints.chat_limit_exceeded'))
     }
     pendingFiles.value.push(f)
   }
@@ -179,6 +190,12 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
+function pendingFileReferenceLabel(file: File): string {
+  return file.size > chatAttachmentMaxBytes.value
+    ? t('upload.references.shared_file')
+    : t('upload.references.chat_attachment')
 }
 
 function handleDragOver(e: DragEvent) {
@@ -1304,6 +1321,7 @@ function updateSuggestionIndex(state: SuggestionState, idx: number) {
             <FileText class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
             <span class="truncate">{{ file.name }}</span>
             <span class="text-muted-foreground shrink-0">({{ formatFileSize(file.size) }})</span>
+            <span class="text-muted-foreground shrink-0">{{ pendingFileReferenceLabel(file) }}</span>
             <Button variant="unstyled" size="unstyled"
               class="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-destructive text-destructive-foreground opacity-0 group-hover:opacity-100 transition-opacity"
               @click.stop="removePendingFile(idx)"

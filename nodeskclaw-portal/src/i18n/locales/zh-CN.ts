@@ -799,6 +799,7 @@ const zhCN = {
     attachFile: "添加附件",
     fileUploadDisabled: "当前组织暂未配置对象存储，无法上传文件",
     fileTooLarge: "文件大小不能超过 {size}MB",
+    fileCountExceeded: "每条消息最多上传 {count} 个文件",
     fileUploading: "正在上传文件...",
     fileUploadFailed: "文件上传失败",
     downloadFile: "下载文件",

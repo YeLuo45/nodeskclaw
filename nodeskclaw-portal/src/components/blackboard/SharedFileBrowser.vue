@@ -5,9 +5,13 @@ import { useI18n } from 'vue-i18n'
 import api from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { FileInput, Input } from '@/components/ui/input'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{ workspaceId: string }>()
 const { t } = useI18n()
+const store = useWorkspaceStore()
+const toast = useToast()
 
 interface FileItem {
   id: string
@@ -27,6 +31,10 @@ const newDirName = ref('')
 const creating = ref(false)
 const uploading = ref(false)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const DEFAULT_SHARED_FILE_MAX_BYTES = 200 * 1024 * 1024
+const sharedFileMaxBytes = computed(() => (
+  store.uploadPolicy?.surfaces?.shared_file?.max_file_size_bytes as number | undefined
+) || DEFAULT_SHARED_FILE_MAX_BYTES)
 
 const breadcrumbs = computed(() => {
   const parts = currentPath.value.split('/').filter(Boolean)
@@ -87,20 +95,28 @@ async function uploadFile(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+  if (!store.fileUploadEnabled) {
+    toast.error(t('upload.hints.storage_unavailable'))
+    input.value = ''
+    return
+  }
+  if (file.size > sharedFileMaxBytes.value) {
+    toast.error(t('chat.fileTooLarge', { size: Math.floor(sharedFileMaxBytes.value / (1024 * 1024)) }))
+    input.value = ''
+    return
+  }
 
   uploading.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    formData.append('parent_path', currentPath.value)
-    formData.append('filename', file.name)
-    formData.append('content_type', file.type || 'application/octet-stream')
-    await api.post(`/workspaces/${props.workspaceId}/blackboard/files/upload-multipart`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-    await fetchFiles()
+    const result = await store.uploadSharedFile(props.workspaceId, file, currentPath.value)
+    if (result) {
+      await fetchFiles()
+    } else {
+      toast.error(t('chat.fileUploadFailed'))
+    }
   } catch (e) {
     console.error('upload error:', e)
+    toast.error(t('chat.fileUploadFailed'))
   } finally {
     uploading.value = false
     input.value = ''
@@ -133,8 +149,15 @@ function formatSize(bytes: number) {
   return `${(bytes / 1048576).toFixed(1)} MB`
 }
 
-onMounted(fetchFiles)
-watch(() => props.workspaceId, () => { currentPath.value = '/'; fetchFiles() })
+onMounted(() => {
+  store.fetchSystemCapabilities()
+  fetchFiles()
+})
+watch(() => props.workspaceId, () => {
+  currentPath.value = '/'
+  store.fetchSystemCapabilities()
+  fetchFiles()
+})
 </script>
 
 <template>
@@ -160,7 +183,8 @@ watch(() => props.workspaceId, () => { currentPath.value = '/'; fetchFiles() })
         </Button>
         <Button variant="unstyled" size="unstyled"
           class="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg hover:bg-muted transition-colors"
-          :disabled="uploading"
+          :disabled="uploading || !store.fileUploadEnabled"
+          :title="store.fileUploadEnabled ? t('upload.actions.upload_to_shared_file') : t('upload.hints.storage_unavailable')"
           @click="fileInputRef?.click()"
         >
           <Loader2 v-if="uploading" class="w-3.5 h-3.5 animate-spin" />
