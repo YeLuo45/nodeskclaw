@@ -51,4 +51,6 @@ ignore = ["E501", "UP017", "I001", "UP042", "F401", "F841", "E702", "UP035", "UP
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]

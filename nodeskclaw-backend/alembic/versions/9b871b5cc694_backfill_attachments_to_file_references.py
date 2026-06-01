@@ -15,9 +15,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 revision: str = '9b871b5cc694'
-down_revision: Union[str, Sequence[str], None] = '64b548305e03'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '64b548305e03'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 BATCH_SIZE = 500
 

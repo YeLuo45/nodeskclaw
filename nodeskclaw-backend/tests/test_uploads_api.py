@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.core.exceptions import BadRequestError, NotFoundError, ForbiddenError
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, ForbiddenError
 from app.services import upload_session_service, upload_policy_service
 from app.services import file_scan_service, file_cleanup_service
 from app.schemas.upload import UploadSessionCreateRequest
@@ -113,7 +113,7 @@ async def test_create_session_conflict_strategy_fail(monkeypatch) -> None:
         _ScalarResult("ws-1"),
     ])
 
-    with pytest.raises(BadRequestError) as exc:
+    with pytest.raises(ConflictError) as exc:
         await upload_session_service.create_upload_session(
             db,
             workspace_id="ws-1",
@@ -207,8 +207,8 @@ async def test_cancel_session_releases_quota(monkeypatch) -> None:
 
     db = _SequenceDb([
         _ScalarResult(session),
-        _ScalarsResult([]),
         _ScalarResult(reservation),
+        _ScalarsResult([]),
     ])
 
     await upload_session_service.cancel_upload_session(db, workspace_id="ws-1", session_id="session-1")
@@ -243,8 +243,8 @@ async def test_session_expire_releases_quota(monkeypatch) -> None:
 
     db = _SequenceDb([
         _ScalarsResult([session]),
-        _ScalarsResult([]),
         _ScalarResult(reservation),
+        _ScalarsResult([]),
     ])
 
     await file_cleanup_service.expire_upload_sessions(db)

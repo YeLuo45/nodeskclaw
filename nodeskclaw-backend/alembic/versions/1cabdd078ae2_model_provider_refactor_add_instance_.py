@@ -12,9 +12,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '1cabdd078ae2'
-down_revision: Union[str, Sequence[str], None] = 'effcea6592fc'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = 'effcea6592fc'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

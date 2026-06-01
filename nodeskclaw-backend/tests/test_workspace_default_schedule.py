@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.models import Base
 from app.models.cluster import Cluster
@@ -16,26 +17,23 @@ from app.services.workspace_defaults import (
     DEFAULT_WORKSPACE_SCHEDULE_NAME,
 )
 from app.services.workspace_service import create_workspace
+from tests.conftest import drop_test_database, recreate_test_database
 
 TEST_DATABASE_URL = "postgresql+asyncpg://nodeskclaw:nodeskclaw@localhost:5432/nodeskclaw_test"
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(scope="module", autouse=True)
 async def setup_db():
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    except Exception:
+    if not await recreate_test_database(engine):
         yield False
         return
 
     yield True
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await drop_test_database(engine)
 
 
 @pytest.mark.asyncio
@@ -60,8 +58,10 @@ async def test_create_workspace_uses_neutral_default_schedule_copy(setup_db):
             compute_provider="k8s",
             created_by=user.id,
         )
-        db.add_all([org, user, cluster])
-        await db.commit()
+        db.add_all([org, user])
+        await db.flush()
+        db.add(cluster)
+        await db.flush()
 
         workspace = await create_workspace(
             db,

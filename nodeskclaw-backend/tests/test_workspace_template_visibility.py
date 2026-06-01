@@ -15,7 +15,7 @@ from tests.conftest import TestSessionLocal
 
 
 @pytest.fixture
-async def template_visibility_data():
+async def template_visibility_data(setup_db):
     suffix = uuid4().hex[:8]
     org_a = Organization(id=f"org-tpl-a-{suffix}", name="Template Org A", slug=f"template-org-a-{suffix}")
     org_b = Organization(id=f"org-tpl-b-{suffix}", name="Template Org B", slug=f"template-org-b-{suffix}")
@@ -69,7 +69,7 @@ async def test_get_template_blocks_other_org_private_template(client, template_v
         template_visibility_data["user"], template_visibility_data["org"],
     )
     try:
-        response = await client.get(f"/api/v1/templates/{template_visibility_data['template_id']}")
+        response = await client.get(f"/api/v1/workspaces/templates/{template_visibility_data['template_id']}")
     finally:
         app.dependency_overrides.pop(get_current_org, None)
 
@@ -89,7 +89,7 @@ async def test_delete_template_blocks_other_org_private_template(client, templat
         template_visibility_data["user"], template_visibility_data["org"],
     )
     try:
-        response = await client.delete(f"/api/v1/templates/{template_visibility_data['template_id']}")
+        response = await client.delete(f"/api/v1/workspaces/templates/{template_visibility_data['template_id']}")
     finally:
         app.dependency_overrides.pop(get_current_org, None)
 
@@ -110,7 +110,7 @@ async def test_apply_template_blocks_other_org_private_template(client, template
     )
     try:
         response = await client.post(
-            f"/api/v1/templates/{template_visibility_data['template_id']}/apply",
+            f"/api/v1/workspaces/templates/{template_visibility_data['template_id']}/apply",
             json={"target_workspace_id": template_visibility_data["workspace_id"]},
         )
     finally:
@@ -132,7 +132,7 @@ async def test_delete_template_keeps_other_org_template_undeleted(client, templa
         template_visibility_data["user"], template_visibility_data["org"],
     )
     try:
-        await client.delete(f"/api/v1/templates/{template_visibility_data['template_id']}")
+        await client.delete(f"/api/v1/workspaces/templates/{template_visibility_data['template_id']}")
     finally:
         app.dependency_overrides.pop(get_current_org, None)
 

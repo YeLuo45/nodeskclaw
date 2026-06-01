@@ -15,9 +15,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = 'b9f5520c1ffb'
-down_revision: Union[str, Sequence[str], None] = '429f7d7a6e40'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '429f7d7a6e40'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 t_workspaces = sa.table(
     "workspaces",

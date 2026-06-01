@@ -7,6 +7,7 @@ from unittest.mock import ANY, AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.api import workspaces as workspace_api
 from app.main import app
@@ -18,7 +19,7 @@ from app.schemas.workspace import TaskInfo
 from app.services.workspace_service import list_tasks, list_tasks_paginated
 
 TEST_DATABASE_URL = "postgresql+asyncpg://nodeskclaw:nodeskclaw@localhost:5432/nodeskclaw_test"
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

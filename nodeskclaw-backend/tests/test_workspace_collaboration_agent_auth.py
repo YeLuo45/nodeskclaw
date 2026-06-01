@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import Response
 
 from app.api import blackboard
 from app.api import corridors
@@ -53,6 +54,12 @@ class _SequenceDb:
 class _Dump:
     def __init__(self, data: dict) -> None:
         self._data = data
+
+    def __getattr__(self, name: str):
+        try:
+            return self._data[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
     def model_dump(self, mode: str | None = None) -> dict:
         return self._data
@@ -263,7 +270,7 @@ async def test_agent_auth_can_read_workspace_chat_history(monkeypatch, agent_act
         q=None,
         from_at=None,
         to_at=None,
-        db=_WorkspaceAgentDb(has_agent=True),
+        db=_SequenceDb([_ScalarResult("workspace-agent-1"), _ScalarsResult([])]),
         user=SimpleNamespace(id="user-1"),
     )
 
@@ -306,12 +313,17 @@ async def test_agent_auth_can_download_workspace_file(monkeypatch, agent_actor):
         content_type="text/plain",
     )
     monkeypatch.setattr("app.services.storage_service.is_configured", lambda: True)
-    download_file = AsyncMock(return_value=b"file-body")
-    monkeypatch.setattr("app.services.storage_service.download_file", download_file)
+    download_response = Response(
+        content=b"file-body",
+        headers={"content-length": "9", "content-disposition": "attachment; filename*=UTF-8''report.txt"},
+    )
+    build_download_response = AsyncMock(return_value=download_response)
+    monkeypatch.setattr("app.api.file_downloads.build_storage_download_response", build_download_response)
 
     response = await workspaces.download_workspace_file(
         "ws-1",
         "file-1",
+        request=SimpleNamespace(headers={}),
         db=_SequenceDb([_ScalarResult("workspace-agent-1"), _ScalarResult(file_row)]),
         user=SimpleNamespace(id="user-1"),
     )
@@ -320,7 +332,12 @@ async def test_agent_auth_can_download_workspace_file(monkeypatch, agent_actor):
     assert response.headers["content-length"] == "9"
     assert "report.txt" in response.headers["content-disposition"]
     workspaces.wm_service.check_workspace_member.assert_not_awaited()
-    download_file.assert_awaited_once_with("workspace/ws-1/report.txt")
+    build_download_response.assert_awaited_once_with(
+        storage_key="workspace/ws-1/report.txt",
+        filename="report.txt",
+        content_type="text/plain",
+        range_header=None,
+    )
 
 
 async def test_agent_auth_download_workspace_file_requires_workspace_agent(monkeypatch, agent_actor):
@@ -337,6 +354,7 @@ async def test_agent_auth_download_workspace_file_requires_workspace_agent(monke
         await workspaces.download_workspace_file(
             "ws-1",
             "file-1",
+            request=SimpleNamespace(headers={}),
             db=_WorkspaceAgentDb(has_agent=False),
             user=SimpleNamespace(id="user-1"),
         )
@@ -356,11 +374,15 @@ async def test_user_auth_download_workspace_file_through_workspace_member(monkey
         content_type="text/plain",
     )
     monkeypatch.setattr("app.services.storage_service.is_configured", lambda: True)
-    monkeypatch.setattr("app.services.storage_service.download_file", AsyncMock(return_value=b"file-body"))
+    monkeypatch.setattr(
+        "app.api.file_downloads.build_storage_download_response",
+        AsyncMock(return_value=Response(content=b"file-body")),
+    )
 
     response = await workspaces.download_workspace_file(
         "ws-1",
         "file-1",
+        request=SimpleNamespace(headers={}),
         db=_SequenceDb([_ScalarResult(file_row)]),
         user=SimpleNamespace(id="user-1"),
     )
@@ -466,7 +488,7 @@ async def test_agent_auth_can_write_shared_files(monkeypatch, agent_actor):
     )
     monkeypatch.setattr(blackboard, "_enforce_agent_blackboard_topology", AsyncMock())
     monkeypatch.setattr(blackboard, "_broadcast", lambda *_args, **_kwargs: None)
-    create_shared_directory = AsyncMock(return_value=_Dump({"id": "dir-1"}))
+    create_shared_directory = AsyncMock(return_value=_Dump({"id": "dir-1", "parent_path": "/", "name": "docs"}))
     monkeypatch.setattr(blackboard.workspace_service, "create_shared_directory", create_shared_directory)
 
     response = await blackboard.mkdir(
@@ -491,7 +513,11 @@ async def test_agent_auth_can_upload_shared_files_multipart(monkeypatch, agent_a
     monkeypatch.setattr(blackboard, "_enforce_agent_blackboard_topology", AsyncMock())
     monkeypatch.setattr(blackboard, "_broadcast", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(blackboard, "get_surface_max_bytes", AsyncMock(return_value=200 * 1024 * 1024))
-    upload_shared_file_object = AsyncMock(return_value=_Dump({"id": "file-1"}))
+    upload_shared_file_object = AsyncMock(return_value=_Dump({
+        "id": "file-1",
+        "file_size": 9,
+        "content_type": "text/markdown",
+    }))
     monkeypatch.setattr(
         blackboard.workspace_service,
         "upload_shared_file_object",

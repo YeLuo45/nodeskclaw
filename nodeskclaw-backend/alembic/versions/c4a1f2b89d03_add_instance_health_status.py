@@ -12,9 +12,9 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = 'c4a1f2b89d03'
-down_revision: Union[str, Sequence[str], None] = '7318dfeb7c3f'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '7318dfeb7c3f'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

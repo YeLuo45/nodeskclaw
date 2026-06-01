@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.core.security import get_current_user
 from app.main import app
@@ -12,26 +13,23 @@ from app.models import Base
 from app.models.admin_membership import AdminMembership
 from app.models.organization import Organization
 from app.models.user import User
+from tests.conftest import drop_test_database, recreate_test_database
 
 TEST_DATABASE_URL = "postgresql+asyncpg://nodeskclaw:nodeskclaw@localhost:5432/nodeskclaw_test"
 
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(scope="module", autouse=True)
 async def setup_db():
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    except Exception:
+    if not await recreate_test_database(engine):
         yield False
         return
 
     yield True
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await drop_test_database(engine)
 
 
 @pytest.fixture

@@ -14,9 +14,9 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '7318dfeb7c3f'
-down_revision: Union[str, Sequence[str], None] = '90f0cc94a2c1'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '90f0cc94a2c1'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 OLD_OPENCLAW_REGISTRY = "nodesk-center-cn-beijing.cr.volces.com/base-image/nodeskclaw-openclaw-base"
 NEW_OPENCLAW_REGISTRY = "nodesk-center-cn-beijing.cr.volces.com/public/deskclaw-openclaw"

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.models.conversation import Conversation
 from app.models.organization import Organization
@@ -12,7 +13,7 @@ from app.models.workspace_message import WorkspaceMessage
 from app.services.workspace_message_service import get_recent_messages, record_message
 
 TEST_DATABASE_URL = "postgresql+asyncpg://nodeskclaw:nodeskclaw@localhost:5432/nodeskclaw_test"
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -56,7 +57,12 @@ async def test_blackboard_conversation_history_includes_legacy_unscoped_messages
             member_node_ids=["agent-1", "agent-3"],
             member_hash="normal-hash",
         )
-        db.add_all([org, user, workspace, blackboard, normal])
+        db.add_all([org, user])
+        await db.flush()
+        db.add(workspace)
+        await db.flush()
+        db.add_all([blackboard, normal])
+        await db.flush()
         db.add_all([
             WorkspaceMessage(
                 id="msg-legacy",
@@ -126,7 +132,12 @@ async def test_normal_conversation_history_excludes_legacy_unscoped_messages():
             member_node_ids=["agent-1", "agent-2"],
             member_hash="normal-only-hash",
         )
-        db.add_all([org, user, workspace, normal])
+        db.add_all([org, user])
+        await db.flush()
+        db.add(workspace)
+        await db.flush()
+        db.add(normal)
+        await db.flush()
         db.add_all([
             WorkspaceMessage(
                 id="msg-normal-legacy",
@@ -179,8 +190,12 @@ async def test_record_message_sanitizes_agent_content_and_conversation_preview()
             member_node_ids=["agent-1"],
             member_hash="record-sanitize",
         )
-        db.add_all([org, user, workspace, conversation])
-        await db.commit()
+        db.add_all([org, user])
+        await db.flush()
+        db.add(workspace)
+        await db.flush()
+        db.add(conversation)
+        await db.flush()
 
         message = await record_message(
             db,

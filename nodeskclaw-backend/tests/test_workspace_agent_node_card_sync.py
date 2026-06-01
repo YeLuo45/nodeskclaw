@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.models.cluster import Cluster
 from app.models.corridor import HumanHex
@@ -17,7 +18,7 @@ from app.services import conversation_service
 import app.services.corridor_router as corridor_router
 
 TEST_DATABASE_URL = "postgresql+asyncpg://nodeskclaw:nodeskclaw@localhost:5432/nodeskclaw_test"
-engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -85,7 +86,13 @@ async def test_update_agent_syncs_node_card_position(monkeypatch: pytest.MonkeyP
             hex_r=0,
             name="Agent",
         )
-        db.add_all([org, user, cluster, workspace, instance, agent, card])
+        db.add_all([org, user])
+        await db.flush()
+        db.add_all([cluster, workspace])
+        await db.flush()
+        db.add(instance)
+        await db.flush()
+        db.add_all([agent, card])
         await db.commit()
 
         updated = await workspace_service.update_agent(
@@ -158,7 +165,13 @@ async def test_update_agent_syncs_node_card_name_on_rename(monkeypatch: pytest.M
             hex_r=0,
             name="Agent Origin",
         )
-        db.add_all([org, user, cluster, workspace, instance, agent, card])
+        db.add_all([org, user])
+        await db.flush()
+        db.add_all([cluster, workspace])
+        await db.flush()
+        db.add(instance)
+        await db.flush()
+        db.add_all([agent, card])
         await db.commit()
 
         updated = await workspace_service.update_agent(
@@ -289,10 +302,15 @@ async def test_add_agent_auto_position_skips_occupied_node_cards(monkeypatch: py
             org_id=org.id,
             status="running",
         )
-        db.add_all([
-            org, user, cluster, workspace, *existing_instances, *existing_agents,
-            *existing_cards, human, new_instance,
-        ])
+        db.add_all([org, user])
+        await db.flush()
+        db.add(cluster)
+        await db.flush()
+        db.add(workspace)
+        await db.flush()
+        db.add_all([*existing_instances, new_instance])
+        await db.flush()
+        db.add_all([*existing_agents, *existing_cards, human])
         await db.commit()
 
         added = await workspace_service.add_agent(

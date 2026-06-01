@@ -13,9 +13,9 @@ from sqlalchemy.dialects.postgresql import JSON
 
 
 revision: str = "f2a8c1d4e5b6"
-down_revision: Union[str, Sequence[str], None] = "68c9c4eb557f"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "68c9c4eb557f"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
