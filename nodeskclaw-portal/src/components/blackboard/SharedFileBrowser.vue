@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { FileInput, Input } from '@/components/ui/input'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useToast } from '@/composables/useToast'
+import FileConflictDialog from './FileConflictDialog.vue'
 
 const props = defineProps<{ workspaceId: string }>()
 const { t } = useI18n()
@@ -35,6 +36,21 @@ const DEFAULT_SHARED_FILE_MAX_BYTES = 200 * 1024 * 1024
 const sharedFileMaxBytes = computed(() => (
   store.uploadPolicy?.surfaces?.shared_file?.max_file_size_bytes as number | undefined
 ) || DEFAULT_SHARED_FILE_MAX_BYTES)
+
+const conflictDialogOpen = ref(false)
+const conflictFile = ref<File | null>(null)
+const conflictExistingInfo = ref<{ size?: number; date?: string }>({})
+
+function isFileConflictError(e: unknown): boolean {
+  const resp = (e as { response?: { data?: { error_code?: string } } })?.response
+  return resp?.data?.error_code === 'file_conflict'
+}
+
+function getConflictExistingInfo(e: unknown): { size?: number; date?: string } {
+  const resp = (e as { response?: { data?: { data?: { existing_file?: { file_size?: number; updated_at?: string } } } } })?.response
+  const existing = resp?.data?.data?.existing_file
+  return { size: existing?.file_size, date: existing?.updated_at?.slice(0, 10) }
+}
 
 const breadcrumbs = computed(() => {
   const parts = currentPath.value.split('/').filter(Boolean)
@@ -108,18 +124,45 @@ async function uploadFile(event: Event) {
 
   uploading.value = true
   try {
-    const result = await store.uploadSharedFile(props.workspaceId, file, currentPath.value)
+    const result = await store.uploadSharedFile(props.workspaceId, file, currentPath.value, 'fail')
     if (result) {
       await fetchFiles()
     } else {
       toast.error(t('chat.fileUploadFailed'))
     }
   } catch (e) {
-    console.error('upload error:', e)
-    toast.error(t('chat.fileUploadFailed'))
+    if (isFileConflictError(e)) {
+      conflictFile.value = file
+      conflictExistingInfo.value = getConflictExistingInfo(e)
+      conflictDialogOpen.value = true
+    } else {
+      toast.error(t('chat.fileUploadFailed'))
+    }
   } finally {
     uploading.value = false
     input.value = ''
+  }
+}
+
+async function handleConflictResolve(strategy: 'keep_both' | 'overwrite' | 'cancel') {
+  conflictDialogOpen.value = false
+  if (strategy === 'cancel' || !conflictFile.value) {
+    conflictFile.value = null
+    return
+  }
+  uploading.value = true
+  try {
+    const result = await store.uploadSharedFile(props.workspaceId, conflictFile.value, currentPath.value, strategy)
+    if (result) {
+      await fetchFiles()
+    } else {
+      toast.error(t('chat.fileUploadFailed'))
+    }
+  } catch {
+    toast.error(t('chat.fileUploadFailed'))
+  } finally {
+    uploading.value = false
+    conflictFile.value = null
   }
 }
 
@@ -248,5 +291,14 @@ watch(() => props.workspaceId, () => {
         </div>
       </div>
     </div>
+
+    <FileConflictDialog
+      :open="conflictDialogOpen"
+      :file-name="conflictFile?.name || ''"
+      :existing-size="conflictExistingInfo.size"
+      :existing-date="conflictExistingInfo.date"
+      :new-size="conflictFile?.size"
+      @resolve="handleConflictResolve"
+    />
   </div>
 </template>

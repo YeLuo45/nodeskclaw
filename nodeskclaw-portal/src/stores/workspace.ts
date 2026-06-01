@@ -429,10 +429,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function uploadSharedFile(workspaceId: string, file: File, parentPath = '/'): Promise<FileReference | null> {
+  async function uploadSharedFile(workspaceId: string, file: File, parentPath = '/', conflictStrategy = 'fail'): Promise<FileReference | null> {
     const threshold = Number(uploadPolicy.value?.surfaces?.shared_file?.chunked_upload_threshold_bytes || 50 * 1024 * 1024)
     if (file.size >= threshold) {
-      return await uploadSharedFileBySession(workspaceId, file, parentPath)
+      return await uploadSharedFileBySession(workspaceId, file, parentPath, conflictStrategy)
     }
 
     const formData = new FormData()
@@ -440,6 +440,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     formData.append('parent_path', parentPath)
     formData.append('filename', file.name)
     formData.append('content_type', file.type || 'application/octet-stream')
+    formData.append('conflict_strategy', conflictStrategy)
     try {
       const res = await api.post(`/workspaces/${workspaceId}/blackboard/files/upload-multipart`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -457,11 +458,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       }
     } catch (e) {
       console.error('uploadSharedFile error:', e)
-      return null
+      throw e
     }
   }
 
-  async function uploadSharedFileBySession(workspaceId: string, file: File, parentPath = '/'): Promise<FileReference | null> {
+  async function uploadSharedFileBySession(workspaceId: string, file: File, parentPath = '/', conflictStrategy = 'fail'): Promise<FileReference | null> {
     let sessionId = ''
     try {
       const createRes = await api.post(`/workspaces/${workspaceId}/uploads/sessions`, {
@@ -471,7 +472,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         expected_size: file.size,
         parent_path: parentPath,
         purpose: 'workspace_shared_file',
-        conflict_strategy: 'keep_both',
+        conflict_strategy: conflictStrategy,
         client_request_id: `${file.name}:${file.size}:${file.lastModified}`,
       })
       const session = createRes.data.data as UploadSessionInfo
@@ -519,7 +520,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         }
       }
       console.error('uploadSharedFileBySession error:', e)
-      return null
+      throw e
     }
   }
 
