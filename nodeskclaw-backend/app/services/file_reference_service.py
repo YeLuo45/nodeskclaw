@@ -13,6 +13,7 @@ from app.models.blackboard_file import BlackboardFile
 from app.models.instance import Instance
 from app.models.workspace_agent import WorkspaceAgent
 from app.models.workspace_file import WorkspaceFile
+from app.models.workspace_large_input_file import WorkspaceLargeInputFile
 from app.models.workspace_message import WorkspaceMessage
 from app.models.workspace_message_file_reference import WorkspaceMessageFileReference
 
@@ -81,10 +82,7 @@ async def resolve_message_file_references(
         elif source == SOURCE_SHARED_FILE:
             ref = await _resolve_shared_file(db, workspace_id, file_id, sort_order)
         elif source == SOURCE_LARGE_INPUT:
-            raise BadRequestError(
-                "大文件输入引用表尚未创建",
-                message_key="errors.upload.large_input_not_implemented",
-            )
+            ref = await _resolve_large_input(db, workspace_id, file_id, sort_order)
         else:
             raise BadRequestError(
                 "文件引用来源无效",
@@ -151,6 +149,44 @@ async def _resolve_shared_file(
         file_size=file_record.file_size,
         content_type=file_record.content_type,
         scan_status=getattr(file_record, "scan_status", "skipped"),
+        sort_order=sort_order,
+    )
+
+
+async def _resolve_large_input(
+    db: AsyncSession,
+    workspace_id: str,
+    file_id: str,
+    sort_order: int,
+) -> dict:
+    result = await db.execute(
+        select(WorkspaceLargeInputFile).where(
+            WorkspaceLargeInputFile.id == file_id,
+            WorkspaceLargeInputFile.workspace_id == workspace_id,
+            WorkspaceLargeInputFile.status == "available",
+            WorkspaceLargeInputFile.deleted_at.is_(None),
+        )
+    )
+    file_record = result.scalar_one_or_none()
+    if file_record is None:
+        raise BadRequestError(
+            "引用的大文件输入不存在",
+            message_key="errors.upload.file_reference_not_found",
+        )
+    now = datetime.now(timezone.utc)
+    if file_record.expires_at is not None and file_record.expires_at <= now:
+        raise BadRequestError(
+            "引用的大文件输入已过期",
+            message_key="errors.upload.file_reference_unavailable",
+        )
+    return _snapshot(
+        source=SOURCE_LARGE_INPUT,
+        file_id=file_record.id,
+        display_name=file_record.display_name,
+        file_size=file_record.size,
+        content_type=file_record.content_type,
+        scan_status=file_record.scan_status,
+        status=file_record.status,
         sort_order=sort_order,
     )
 
@@ -372,10 +408,29 @@ async def resolve_grant_source_file(
             "scan_status": getattr(source_file, "scan_status", "skipped"),
         }
 
-    raise BadRequestError(
-        "大文件输入下载尚未实现",
-        message_key="errors.upload.large_input_not_implemented",
-    )
+    if grant.source == SOURCE_LARGE_INPUT:
+        result = await db.execute(
+            select(WorkspaceLargeInputFile).where(
+                WorkspaceLargeInputFile.id == grant.file_id,
+                WorkspaceLargeInputFile.workspace_id == grant.workspace_id,
+                WorkspaceLargeInputFile.status == "available",
+                WorkspaceLargeInputFile.deleted_at.is_(None),
+            )
+        )
+        source_file = result.scalar_one_or_none()
+        if source_file is None:
+            raise NotFoundError("源文件不存在", "errors.upload.file_reference_not_found")
+        now = datetime.now(timezone.utc)
+        if source_file.expires_at is not None and source_file.expires_at <= now:
+            raise NotFoundError("源文件已过期", "errors.upload.file_reference_not_found")
+        return {
+            "storage_key": source_file.storage_key,
+            "filename": source_file.display_name,
+            "content_type": source_file.content_type,
+            "scan_status": source_file.scan_status,
+        }
+
+    raise BadRequestError("文件引用来源无效", message_key="errors.upload.file_reference_invalid_source")
 
 
 def ensure_scan_allows_download(scan_status: str) -> None:

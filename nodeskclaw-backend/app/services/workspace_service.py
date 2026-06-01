@@ -4,7 +4,7 @@ import asyncio
 import base64
 import logging
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Coroutine, Literal
 
 from sqlalchemy import and_, case, func, or_, select
@@ -1793,7 +1793,7 @@ async def upload_shared_file_object(
     parent_path: str = "/",
     max_bytes: int | None = None,
 ) -> FileInfo:
-    storage_key, file_size, _checksum = await storage_service.upload_file_object(
+    storage_key, file_size, checksum = await storage_service.upload_file_object(
         file_obj,
         filename,
         content_type,
@@ -1811,6 +1811,9 @@ async def upload_shared_file_object(
         content_type=content_type,
         storage_key=storage_key,
         parent_path=parent_path,
+        checksum=f"sha256:{checksum}",
+        scan_status="skipped",
+        scan_reason="metadata_only",
     )
 
 
@@ -1826,6 +1829,9 @@ async def _upsert_shared_file_metadata(
     content_type: str,
     storage_key: str,
     parent_path: str = "/",
+    checksum: str = "",
+    scan_status: str = "skipped",
+    scan_reason: str = "metadata_only",
 ) -> FileInfo:
     parent_path = _validate_path(parent_path)
     existing = (await db.execute(
@@ -1846,6 +1852,10 @@ async def _upsert_shared_file_metadata(
         existing.uploader_type = uploader_type
         existing.uploader_id = uploader_id
         existing.uploader_name = uploader_name
+        existing.checksum = checksum
+        existing.scan_status = scan_status
+        existing.scan_reason = scan_reason
+        existing.scanned_at = datetime.now(timezone.utc) if scan_status == "skipped" else None
         await db.commit()
         await db.refresh(existing)
         return _file_to_info(existing)
@@ -1861,6 +1871,10 @@ async def _upsert_shared_file_metadata(
         uploader_type=uploader_type,
         uploader_id=uploader_id,
         uploader_name=uploader_name,
+        checksum=checksum,
+        scan_status=scan_status,
+        scan_reason=scan_reason,
+        scanned_at=datetime.now(timezone.utc) if scan_status == "skipped" else None,
     )
     db.add(f)
     await db.commit()
@@ -1916,6 +1930,9 @@ async def copy_shared_file(
         content_type=source.content_type,
         storage_key=storage_key,
         parent_path=target_parent_path,
+        checksum=source.checksum,
+        scan_status=getattr(source, "scan_status", "skipped"),
+        scan_reason=getattr(source, "scan_reason", "copied"),
     )
 
 

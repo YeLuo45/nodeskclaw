@@ -13,7 +13,7 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.common import ApiResponse
 from app.services import config_service
-from app.services.upload_policy_service import UPLOAD_CONFIG_KEYS
+from app.services.upload_policy_service import UPLOAD_CONFIG_KEYS, validate_upload_config_value
 from app.services.runtime.registries.runtime_registry import RUNTIME_REGISTRY
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,8 @@ async def update_setting(
                 f"规格预设格式无效: {exc}",
                 "errors.settings.invalid_spec_presets",
             )
+
+    await validate_upload_config_value(key, body.value, db)
 
     row = await config_service.set_config(key, body.value, db)
     display_value = "******" if key in _SENSITIVE_KEYS and row.value else row.value

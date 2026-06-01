@@ -11,6 +11,7 @@ from app.schemas.workspace import (
     MkdirRequest,
 )
 from app.services import storage_service, workspace_service
+from app.services.file_reference_service import ensure_scan_allows_download
 from app.services.upload_policy_service import get_surface_max_bytes
 from app.services.workspace_actor_access import (
     require_workspace_actor_access,
@@ -217,6 +218,7 @@ async def download_file(
             "message_key": "errors.file.not_found",
             "message": "文件不存在",
         })
+    ensure_scan_allows_download(getattr(file_record, "scan_status", "skipped"))
 
     from app.api.file_downloads import build_storage_download_response
 

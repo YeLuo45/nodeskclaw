@@ -27,6 +27,7 @@ from app.api.observability import router as observability_router
 from app.api.runtime_admin import router as runtime_admin_router
 from app.api.mcp import router as mcp_router
 from app.api.trust import router as trust_router
+from app.api.uploads import router as uploads_router
 from app.api.webhooks import router as webhook_router
 from app.api.blackboard import router as blackboard_router
 from app.api.performance import router as performance_router
@@ -138,6 +139,7 @@ api_router.include_router(performance_router, tags=["绩效"])
 api_router.include_router(registry_router, prefix="/registry", tags=["镜像仓库"])
 api_router.include_router(settings_router, prefix="/settings", tags=["系统配置"],
     dependencies=[Depends(require_ce_edition), Depends(require_org_admin)])
+api_router.include_router(uploads_router, tags=["文件上传"])
 api_router.include_router(spec_presets_router, prefix="/spec-presets", tags=["规格预设"])
 api_router.include_router(storage_router, prefix="/storage-classes", tags=["存储"])
 api_router.include_router(template_router, prefix="/workspaces", tags=["办公室模板"])
@@ -204,6 +206,8 @@ admin_router.include_router(cluster_router, prefix="/clusters",
 admin_router.include_router(settings_router, prefix="/settings",
     tags=["Admin - 系统配置"],
     dependencies=[Depends(require_org_role("admin"))])
+admin_router.include_router(uploads_router,
+    tags=["Admin - 文件上传"])
 admin_router.include_router(spec_presets_router, prefix="/spec-presets",
     tags=["Admin - 规格预设"])
 admin_router.include_router(gene_router,

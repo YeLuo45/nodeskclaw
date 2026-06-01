@@ -1216,7 +1216,7 @@ async def upload_workspace_file(
 ):
     """Upload a file to a workspace (multipart/form-data)."""
     from app.services import storage_service
-    from app.services.upload_policy_service import get_surface_max_bytes
+    from app.services.upload_policy_service import get_surface_max_bytes, validate_upload_request
     from app.models.workspace_file import WorkspaceFile
 
     if not storage_service.is_configured():
@@ -1224,12 +1224,21 @@ async def upload_workspace_file(
 
     await wm_service.check_workspace_access(workspace_id, user, "send_chat", db)
 
+    filename = file.filename or "unnamed"
+    content_type = file.content_type or "application/octet-stream"
+    await validate_upload_request(
+        "chat_attachment",
+        filename=filename,
+        content_type=content_type,
+        size=0,
+        db=db,
+    )
     max_bytes = await get_surface_max_bytes("chat_attachment", db)
     try:
         storage_key, file_size, _checksum = await storage_service.upload_file_object(
             file,
-            file.filename or "unnamed",
-            file.content_type or "application/octet-stream",
+            filename,
+            content_type,
             workspace_id,
             max_bytes=max_bytes,
         )
@@ -1251,10 +1260,13 @@ async def upload_workspace_file(
     wf = WorkspaceFile(
         workspace_id=workspace_id,
         uploader_id=user.id,
-        original_name=file.filename or "unnamed",
+        original_name=filename,
         file_size=file_size,
-        content_type=file.content_type or "application/octet-stream",
+        content_type=content_type,
         storage_key=storage_key,
+        checksum=f"sha256:{_checksum}",
+        scan_status="skipped",
+        scan_reason="metadata_only",
     )
     db.add(wf)
     await db.commit()
@@ -1265,6 +1277,9 @@ async def upload_workspace_file(
         "name": wf.original_name,
         "size": wf.file_size,
         "content_type": wf.content_type,
+        "surface": "chat_attachment",
+        "scan_status": wf.scan_status,
+        "download_url_available": wf.scan_status not in {"pending", "blocked", "failed"},
     })
 
 
@@ -1294,6 +1309,8 @@ async def get_file_presigned_url(
     wf = result.scalar_one_or_none()
     if wf is None:
         raise _error(404, 40431, "errors.file.not_found", "文件不存在")
+    from app.services.file_reference_service import ensure_scan_allows_download
+    ensure_scan_allows_download(getattr(wf, "scan_status", "skipped"))
 
     try:
         url = await storage_service.get_presigned_url(wf.storage_key, expires=900)
@@ -1330,6 +1347,8 @@ async def download_workspace_file(
     wf = result.scalar_one_or_none()
     if wf is None:
         raise _error(404, 40431, "errors.file.not_found", "文件不存在")
+    from app.services.file_reference_service import ensure_scan_allows_download
+    ensure_scan_allows_download(getattr(wf, "scan_status", "skipped"))
 
     try:
         from app.api.file_downloads import build_storage_download_response

@@ -51,6 +51,9 @@ from app.models.organization import Organization  # noqa: F401
 from app.models.sse_connection import SSEConnection  # noqa: F401
 from app.models.system_config import SystemConfig  # noqa: F401
 from app.models.trust_policy import TrustPolicy  # noqa: F401
+from app.models.upload_part import UploadPart  # noqa: F401
+from app.models.upload_quota_reservation import UploadQuotaReservation  # noqa: F401
+from app.models.upload_session import UploadSession  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.models.user_llm_config import UserLlmConfig  # noqa: F401
 from app.models.user_llm_key import UserLlmKey  # noqa: F401
@@ -59,6 +62,7 @@ from app.models.workspace_agent import WorkspaceAgent  # noqa: F401
 from app.models.workspace_file import WorkspaceFile  # noqa: F401
 from app.models.workspace_member import WorkspaceMember  # noqa: F401
 from app.models.workspace_message_file_reference import WorkspaceMessageFileReference  # noqa: F401
+from app.models.workspace_large_input_file import WorkspaceLargeInputFile  # noqa: F401
 from app.models.workspace_message import WorkspaceMessage  # noqa: F401
 from app.models.workspace_objective import WorkspaceObjective  # noqa: F401
 from app.models.workspace_schedule import WorkspaceSchedule  # noqa: F401
