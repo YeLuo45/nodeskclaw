@@ -20,7 +20,7 @@ from app.models.workspace_member import WorkspaceMember, WorkspaceRole
 from app.models.workspace_objective import WorkspaceObjective
 from app.models.workspace_schedule import WorkspaceSchedule
 from app.models.workspace_task import WorkspaceTask
-from app.services import storage_service
+from app.services import file_cleanup_service, file_scan_service, storage_service
 from app.services.workspace_defaults import (
     DEFAULT_WORKSPACE_SCHEDULE_MESSAGE,
     DEFAULT_WORKSPACE_SCHEDULE_NAME,
@@ -1793,6 +1793,7 @@ async def upload_shared_file_object(
     parent_path: str = "/",
     max_bytes: int | None = None,
 ) -> FileInfo:
+    scan_status, scan_reason = await file_scan_service.get_initial_scan_state(db)
     storage_key, file_size, checksum = await storage_service.upload_file_object(
         file_obj,
         filename,
@@ -1812,8 +1813,8 @@ async def upload_shared_file_object(
         storage_key=storage_key,
         parent_path=parent_path,
         checksum=f"sha256:{checksum}",
-        scan_status="skipped",
-        scan_reason="metadata_only",
+        scan_status=scan_status,
+        scan_reason=scan_reason,
     )
 
 
@@ -1844,8 +1845,15 @@ async def _upsert_shared_file_metadata(
     )).scalar_one_or_none()
 
     if existing is not None:
+        old_storage_key = existing.storage_key
         if existing.storage_key:
-            await storage_service.delete_file(existing.storage_key)
+            await file_cleanup_service.enqueue_storage_delete(
+                db,
+                workspace_id=workspace_id,
+                source=file_cleanup_service.SOURCE_SHARED_FILE,
+                source_id=existing.id,
+                storage_key=existing.storage_key,
+            )
         existing.storage_key = storage_key
         existing.file_size = file_size
         existing.content_type = content_type
@@ -1856,7 +1864,17 @@ async def _upsert_shared_file_metadata(
         existing.scan_status = scan_status
         existing.scan_reason = scan_reason
         existing.scanned_at = datetime.now(timezone.utc) if scan_status == "skipped" else None
+        if scan_status == "pending":
+            await file_scan_service.enqueue_scan(
+                db,
+                workspace_id=workspace_id,
+                source=file_scan_service.SOURCE_SHARED_FILE,
+                file_id=existing.id,
+                storage_key=storage_key,
+            )
         await db.commit()
+        if old_storage_key == storage_key:
+            logger.warning("shared file overwrite reused the same storage key: file=%s", existing.id)
         await db.refresh(existing)
         return _file_to_info(existing)
 
@@ -1877,6 +1895,15 @@ async def _upsert_shared_file_metadata(
         scanned_at=datetime.now(timezone.utc) if scan_status == "skipped" else None,
     )
     db.add(f)
+    await db.flush()
+    if scan_status == "pending":
+        await file_scan_service.enqueue_scan(
+            db,
+            workspace_id=workspace_id,
+            source=file_scan_service.SOURCE_SHARED_FILE,
+            file_id=f.id,
+            storage_key=storage_key,
+        )
     await db.commit()
     await db.refresh(f)
     return _file_to_info(f)
@@ -1956,6 +1983,7 @@ async def get_shared_file_url(
     f = await get_shared_file_record(db, workspace_id, file_id)
     if f is None or not f.storage_key:
         return None
+    file_scan_service.assert_download_allowed(getattr(f, "scan_status", "skipped"))
     return await storage_service.get_presigned_url(f.storage_key)
 
 
@@ -1966,6 +1994,7 @@ async def read_shared_file(
     f = await get_shared_file_record(db, workspace_id, file_id)
     if f is None or not f.storage_key:
         return None
+    file_scan_service.assert_download_allowed(getattr(f, "scan_status", "skipped"))
     if f.file_size > SHARED_FILE_INLINE_READ_MAX_BYTES:
         raise BadRequestError(
             "文件过大，不能以内联 base64 内容读取，请使用下载 URL",
@@ -1999,11 +2028,23 @@ async def delete_shared_file(
         )).scalars().all()
         for child in children:
             if child.storage_key:
-                await storage_service.delete_file(child.storage_key)
+                await file_cleanup_service.enqueue_storage_delete(
+                    db,
+                    workspace_id=workspace_id,
+                    source=file_cleanup_service.SOURCE_SHARED_FILE,
+                    source_id=child.id,
+                    storage_key=child.storage_key,
+                )
             child.soft_delete()
     else:
         if f.storage_key:
-            await storage_service.delete_file(f.storage_key)
+            await file_cleanup_service.enqueue_storage_delete(
+                db,
+                workspace_id=workspace_id,
+                source=file_cleanup_service.SOURCE_SHARED_FILE,
+                source_id=f.id,
+                storage_key=f.storage_key,
+            )
     f.soft_delete()
     await db.commit()
     return True

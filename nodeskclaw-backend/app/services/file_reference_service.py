@@ -16,11 +16,12 @@ from app.models.workspace_file import WorkspaceFile
 from app.models.workspace_large_input_file import WorkspaceLargeInputFile
 from app.models.workspace_message import WorkspaceMessage
 from app.models.workspace_message_file_reference import WorkspaceMessageFileReference
+from app.services import file_scan_service
 
 SOURCE_CHAT_ATTACHMENT = "chat_attachment"
 SOURCE_SHARED_FILE = "shared_file"
 SOURCE_LARGE_INPUT = "large_input"
-BLOCKING_SCAN_STATUSES = {"pending", "blocked", "failed"}
+BLOCKING_SCAN_STATUSES = file_scan_service.BLOCKING_SCAN_STATUSES
 
 
 def _input_value(item: Any, key: str) -> Any:
@@ -434,13 +435,7 @@ async def resolve_grant_source_file(
 
 
 def ensure_scan_allows_download(scan_status: str) -> None:
-    status = scan_status or "skipped"
-    if status == "pending":
-        raise ForbiddenError("文件安全扫描未完成", "errors.upload.file_scan_pending")
-    if status == "blocked":
-        raise ForbiddenError("文件未通过安全扫描", "errors.upload.file_scan_blocked")
-    if status == "failed":
-        raise ForbiddenError("文件安全扫描失败", "errors.upload.file_scan_failed")
+    file_scan_service.assert_download_allowed(scan_status)
 
 
 async def mark_agent_grant_accessed(db: AsyncSession, grant: AgentFileAccessGrant) -> None:

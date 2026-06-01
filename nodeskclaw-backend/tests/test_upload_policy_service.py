@@ -4,6 +4,8 @@ import pytest
 
 from app.core.config import get_agent_file_download_base_url, settings
 from app.services import storage_service
+from app.core.exceptions import BadRequestError
+from app.services import upload_policy_service
 from app.services.upload_policy_service import build_upload_policy
 
 
@@ -57,3 +59,25 @@ async def test_upload_policy_exposes_surface_limits(monkeypatch) -> None:
     assert policy["gateway"]["proxy_body_size_bytes"] == (
         settings.UPLOAD_GATEWAY_PROXY_BODY_SIZE_MB * 1024 * 1024
     )
+
+
+@pytest.mark.asyncio
+async def test_async_scan_config_cannot_disable_scanner(monkeypatch) -> None:
+    async def get_config(key, _db):
+        values = {
+            "upload_security_scan_mode": "async_required",
+            "upload_scanner_provider": "http",
+            "upload_scanner_endpoint": "http://scanner.local/scan",
+        }
+        return values.get(key)
+
+    monkeypatch.setattr(upload_policy_service.config_service, "get_config", get_config)
+
+    with pytest.raises(BadRequestError) as exc:
+        await upload_policy_service.validate_upload_config_value(
+            "upload_scanner_provider",
+            "none",
+            object(),
+        )
+
+    assert exc.value.message_key == "errors.upload.scanner_unavailable"

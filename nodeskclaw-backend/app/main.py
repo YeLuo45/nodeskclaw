@@ -625,6 +625,8 @@ async def lifespan(app: FastAPI):
     # ── Runtime Platform v2 Startup ──────────────────
     _pg_notify_service = None
     _heartbeat_task = None
+    _file_scan_task = None
+    _file_cleanup_task = None
     _pg_notify_channels: list[str] = []
     _queue_consumer_task = None
     try:
@@ -799,6 +801,37 @@ async def lifespan(app: FastAPI):
         logger.info("遥测启用，将在后台上报匿名安装信息")
         _telemetry_task = asyncio.create_task(_run_telemetry())
 
+    async def _run_file_scan_loop():
+        from app.services import file_scan_service
+        while True:
+            try:
+                async with async_session_factory() as db:
+                    await file_scan_service.run_pending_scan_jobs(db)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("文件扫描后台任务失败（非致命）: %s", e)
+            await asyncio.sleep(60)
+
+    async def _run_file_cleanup_loop():
+        from app.services import file_cleanup_service
+        while True:
+            try:
+                async with async_session_factory() as db:
+                    await file_cleanup_service.expire_upload_sessions(db)
+                    await file_cleanup_service.clean_expired_chat_attachments(db)
+                    await file_cleanup_service.clean_orphan_large_inputs(db)
+                    await file_cleanup_service.run_storage_delete_retry_worker(db)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("文件清理后台任务失败（非致命）: %s", e)
+            await asyncio.sleep(300)
+
+    _file_scan_task = asyncio.create_task(_run_file_scan_loop())
+    _file_cleanup_task = asyncio.create_task(_run_file_cleanup_loop())
+    logger.info("文件上传后台任务已启动")
+
     yield
 
     # ── Security Pipeline 销毁 ────────────────────────
@@ -812,6 +845,10 @@ async def lifespan(app: FastAPI):
 
         if _heartbeat_task and not _heartbeat_task.done():
             _heartbeat_task.cancel()
+        if _file_scan_task and not _file_scan_task.done():
+            _file_scan_task.cancel()
+        if _file_cleanup_task and not _file_cleanup_task.done():
+            _file_cleanup_task.cancel()
         if _pg_notify_service:
             try:
                 await _pg_notify_service.shutdown()

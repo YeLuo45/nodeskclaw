@@ -348,3 +348,17 @@ async def validate_upload_config_value(
                 "异步扫描必需模式需要先配置扫描器",
                 "errors.upload.scanner_unavailable",
             )
+    if key in {"upload_scanner_provider", "upload_scanner_endpoint"}:
+        scan_mode = await _effective_str(db, "upload_security_scan_mode", settings.UPLOAD_SECURITY_SCAN_MODE)
+        if _normalize_scan_mode(scan_mode) == "async_required":
+            provider = value if key == "upload_scanner_provider" else await _effective_str(
+                db, "upload_scanner_provider", settings.UPLOAD_SCANNER_PROVIDER,
+            )
+            endpoint = value if key == "upload_scanner_endpoint" else await _effective_str(
+                db, "upload_scanner_endpoint", settings.UPLOAD_SCANNER_ENDPOINT,
+            )
+            if not _scanner_configured(_normalize_scanner_provider(provider or ""), endpoint or ""):
+                raise BadRequestError(
+                    "异步扫描必需模式需要保持扫描器可用",
+                    "errors.upload.scanner_unavailable",
+                )

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_db
 from app.core.security import get_auth_actor, get_current_user, get_current_user_or_agent
 from app.schemas.upload import UploadCompleteRequest, UploadSessionCreateRequest
-from app.services import storage_service, upload_session_service
+from app.services import file_cleanup_service, file_scan_service, storage_service, upload_session_service
 from app.services.upload_policy_service import build_upload_policy
 from app.services.workspace_actor_access import require_workspace_actor_access, require_workspace_actor_member
 
@@ -79,7 +79,7 @@ def _map_upload_error(exc: Exception) -> HTTPException:
                 "requested_bytes": exc.requested_bytes,
             },
         })
-    if isinstance(exc, upload_session_service.UploadScannerUnavailableError):
+    if isinstance(exc, (upload_session_service.UploadScannerUnavailableError, file_scan_service.ScannerUnavailableError)):
         return HTTPException(status_code=503, detail={
             "error_code": 50311,
             "message_key": "errors.upload.scanner_unavailable",
@@ -104,6 +104,19 @@ async def get_upload_policy(
     _user=Depends(get_current_user),
 ):
     return _ok(await build_upload_policy(db))
+
+
+@router.get("/upload/health")
+async def get_upload_health(
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    policy = await build_upload_policy(db)
+    return _ok({
+        "policy": policy,
+        "scan": await file_scan_service.get_scan_health(db),
+        "cleanup": await file_cleanup_service.get_cleanup_health(db),
+    })
 
 
 @router.post("/workspaces/{workspace_id}/uploads/sessions")
@@ -217,6 +230,7 @@ async def complete_upload_session(
         storage_service.UploadTooLargeError,
         storage_service.StorageUnavailableError,
         upload_session_service.UploadSessionStateError,
+        file_scan_service.ScannerUnavailableError,
     ) as exc:
         raise _map_upload_error(exc) from exc
     return _ok(result)

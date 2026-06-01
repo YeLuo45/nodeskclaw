@@ -10,7 +10,7 @@ from app.schemas.workspace import (
     FileWriteRequest,
     MkdirRequest,
 )
-from app.services import storage_service, workspace_service
+from app.services import file_scan_service, storage_service, workspace_service
 from app.services.file_reference_service import ensure_scan_allows_download
 from app.services.upload_policy_service import get_surface_max_bytes
 from app.services.workspace_actor_access import (
@@ -112,6 +112,12 @@ async def upload_file(
             "message_key": "errors.upload.storage_unavailable",
             "message": "文件存储服务不可用",
             "details": {"reason_code": exc.reason_code},
+        }) from exc
+    except file_scan_service.ScannerUnavailableError as exc:
+        raise HTTPException(status_code=503, detail={
+            "error_code": 50312,
+            "message_key": "errors.upload.scanner_unavailable",
+            "message": "文件扫描服务不可用",
         }) from exc
     _broadcast(workspace_id, "file:uploaded", info.model_dump(mode="json"))
     return _ok(info.model_dump(mode="json"))

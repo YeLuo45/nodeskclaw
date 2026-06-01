@@ -18,6 +18,7 @@ from app.models.delivery_log import DeliveryLog  # noqa: F401
 from app.models.deploy_record import DeployRecord  # noqa: F401
 from app.models.engine_version import EngineVersion  # noqa: F401
 from app.models.event_log import EventLog  # noqa: F401
+from app.models.file_scan_job import FileScanJob  # noqa: F401
 from app.models.gene import (  # noqa: F401
     Gene,
     GeneEffectLog,
@@ -49,6 +50,7 @@ from app.models.org_membership import OrgMembership  # noqa: F401
 from app.models.org_oauth_binding import OrgOAuthBinding  # noqa: F401
 from app.models.organization import Organization  # noqa: F401
 from app.models.sse_connection import SSEConnection  # noqa: F401
+from app.models.storage_object_delete_job import StorageObjectDeleteJob  # noqa: F401
 from app.models.system_config import SystemConfig  # noqa: F401
 from app.models.trust_policy import TrustPolicy  # noqa: F401
 from app.models.upload_part import UploadPart  # noqa: F401

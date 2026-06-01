@@ -29,7 +29,7 @@ from app.schemas.upload import (
     UploadSessionCreateRequest,
     UploadSessionInfo,
 )
-from app.services import storage_service
+from app.services import file_cleanup_service, file_scan_service, storage_service
 from app.services.upload_policy_service import build_upload_policy, validate_upload_request
 
 
@@ -85,15 +85,6 @@ def _normalize_checksum(checksum: str | None) -> str:
 
 def _checksum_hex(checksum: str) -> str:
     return checksum.removeprefix("sha256:")
-
-
-def _scan_snapshot(policy: dict) -> tuple[str, str]:
-    security = policy.get("security") or {}
-    if security.get("scan_mode") == "async_required" and security.get("scanner_configured"):
-        return "pending", "queued"
-    if security.get("scan_mode") == "disabled":
-        return "skipped", "scan_disabled"
-    return "skipped", "metadata_only"
 
 
 def _session_expires_at() -> datetime:
@@ -723,8 +714,7 @@ async def complete_upload_session(
         if expected_checksum and _checksum_hex(expected_checksum) != checksum_hex:
             raise BadRequestError("上传文件校验和不一致", "errors.upload.checksum_mismatch")
 
-        policy = await build_upload_policy(db)
-        scan_status, scan_reason = _scan_snapshot(policy)
+        scan_status, scan_reason = await file_scan_service.get_initial_scan_state(db)
         if session.surface == "shared_file":
             file_record, old_storage_key = await _create_shared_file_from_session(
                 db,
@@ -775,11 +765,30 @@ async def complete_upload_session(
         await db.commit()
     except Exception:
         if storage_key:
-            await storage_service.delete_file(storage_key)
+            try:
+                await storage_service.delete_file(storage_key)
+            except Exception:
+                pass
         raise
 
     if old_storage_key:
-        await storage_service.delete_file(old_storage_key)
+        await file_cleanup_service.enqueue_storage_delete(
+            db,
+            workspace_id=session.workspace_id,
+            source=file_cleanup_service.SOURCE_SHARED_FILE,
+            source_id=committed_file_id,
+            storage_key=old_storage_key,
+        )
+        await db.commit()
+    if scan_status == "pending":
+        await file_scan_service.enqueue_scan(
+            db,
+            workspace_id=session.workspace_id,
+            source=committed_source,
+            file_id=committed_file_id,
+            storage_key=storage_key,
+        )
+        await db.commit()
     await _delete_path(_part_root(session.id))
     return {
         "session_id": session.id,

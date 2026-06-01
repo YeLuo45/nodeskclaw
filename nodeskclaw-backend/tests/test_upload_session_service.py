@@ -188,9 +188,13 @@ async def test_complete_large_input_commits_reservation(monkeypatch, tmp_path) -
     async def build_upload_policy(_db):
         return _policy()
 
+    async def get_initial_scan_state(_db):
+        return "skipped", "metadata_only"
+
     monkeypatch.setattr(upload_session_service.storage_service, "upload_stream", upload_stream)
     monkeypatch.setattr(upload_session_service.storage_service, "delete_file", delete_file)
     monkeypatch.setattr(upload_session_service, "build_upload_policy", build_upload_policy)
+    monkeypatch.setattr(upload_session_service.file_scan_service, "get_initial_scan_state", get_initial_scan_state)
     db = _SequenceDb([
         _ScalarResult(session),
         _ScalarsResult([part]),

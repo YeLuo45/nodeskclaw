@@ -1215,7 +1215,7 @@ async def upload_workspace_file(
     user=Depends(_get_current_user_dep()),
 ):
     """Upload a file to a workspace (multipart/form-data)."""
-    from app.services import storage_service
+    from app.services import file_scan_service, storage_service
     from app.services.upload_policy_service import get_surface_max_bytes, validate_upload_request
     from app.models.workspace_file import WorkspaceFile
 
@@ -1234,6 +1234,15 @@ async def upload_workspace_file(
         db=db,
     )
     max_bytes = await get_surface_max_bytes("chat_attachment", db)
+    try:
+        scan_status, scan_reason = await file_scan_service.get_initial_scan_state(db)
+    except file_scan_service.ScannerUnavailableError as exc:
+        raise _error(
+            503,
+            50312,
+            "errors.upload.scanner_unavailable",
+            "文件扫描服务不可用",
+        ) from exc
     try:
         storage_key, file_size, _checksum = await storage_service.upload_file_object(
             file,
@@ -1265,12 +1274,21 @@ async def upload_workspace_file(
         content_type=content_type,
         storage_key=storage_key,
         checksum=f"sha256:{_checksum}",
-        scan_status="skipped",
-        scan_reason="metadata_only",
+        scan_status=scan_status,
+        scan_reason=scan_reason,
     )
     db.add(wf)
     await db.commit()
     await db.refresh(wf)
+    if scan_status == "pending":
+        await file_scan_service.enqueue_scan(
+            db,
+            workspace_id=workspace_id,
+            source=file_scan_service.SOURCE_CHAT_ATTACHMENT,
+            file_id=wf.id,
+            storage_key=wf.storage_key,
+        )
+        await db.commit()
 
     return _ok({
         "id": wf.id,
