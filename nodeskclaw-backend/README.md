@@ -451,6 +451,7 @@ NetworkPolicy 相关配置项（通过「组织设置 > 网络」页面管理，
 
 | 变量 | 说明 |
 |------|------|
+| `UPLOAD_STORAGE_BACKEND` | 上传存储后端意图，`auto/local/s3`。S3 配置不完整时不会静默回退 local |
 | `S3_ENDPOINT` | S3 兼容对象存储 Endpoint（支持 AWS S3、MinIO、阿里云 OSS、火山云 TOS 等）。与 `S3_BUCKET` 同时配置后启用 |
 | `S3_BUCKET` | S3 Bucket 名称 |
 | `S3_REGION` | S3 Region（可选） |
@@ -459,7 +460,30 @@ NetworkPolicy 相关配置项（通过「组织设置 > 网络」页面管理，
 | `S3_KEY_PREFIX` | 对象 key 前缀（本地开发可设为 dev，生产留空） |
 | `LOCAL_STORAGE_DIR` | 本地文件存储目录。S3 未配置时自动启用本地存储：Docker 容器内默认 `/nodeskclaw-data/shared-files`，本地开发默认 `~/.nodeskclaw/shared-files` |
 
-S3 未配置时系统自动 fallback 到本地文件系统存储，无需额外配置即可使用共享文件和聊天附件功能。
+上传策略配置：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `UPLOAD_CHAT_ATTACHMENT_MAX_MB` | `20` | 对话附件单文件上限 |
+| `UPLOAD_CHAT_ATTACHMENT_MAX_COUNT` | `5` | 单条消息最大附件数 |
+| `UPLOAD_CHAT_ATTACHMENT_RETENTION_DAYS` | `90` | 对话附件对象保留天数 |
+| `UPLOAD_SHARED_FILE_MAX_MB` | `200` | 共享文件单文件上限 |
+| `UPLOAD_LARGE_FILE_MAX_MB` | `2048` | 大文件输入单文件上限 |
+| `UPLOAD_CHUNKED_UPLOAD_THRESHOLD_MB` | `50` | 浏览器或 Agent 使用上传会话的阈值 |
+| `UPLOAD_CHUNK_SIZE_MB` | `8` | 上传会话分片大小 |
+| `UPLOAD_WORKSPACE_QUOTA_MB` | `10240` | 单工作区文件总配额 |
+| `UPLOAD_BLOCKED_EXTENSIONS` | `.exe,.bat,.cmd,.sh` | 禁止上传的扩展名列表 |
+| `UPLOAD_ALLOWED_CONTENT_TYPES` | 空 | 允许的 MIME 类型列表，空表示不限 |
+| `UPLOAD_GATEWAY_PROXY_BODY_SIZE_MB` | `50` | 当前部署网关请求体上限，用于前端提示和策略告警 |
+| `UPLOAD_SECURITY_SCAN_MODE` | `metadata_only` | 文件安全扫描模式，支持 `metadata_only/async_required/disabled` |
+| `UPLOAD_SCANNER_PROVIDER` | `none` | 扫描器提供方，支持 `none/http/clamav` |
+| `UPLOAD_SCANNER_ENDPOINT` | 空 | 扫描器服务地址 |
+| `UPLOAD_SCANNER_TIMEOUT_SECONDS` | `60` | 单次扫描超时时间 |
+| `UPLOAD_SCANNER_MAX_RETRIES` | `3` | 扫描失败最大重试次数 |
+| `UPLOAD_SCANNER_MAX_FILE_MB` | `2048` | 允许进入扫描器的最大文件大小 |
+| `UPLOAD_SCANNER_FAIL_CLOSED` | `true` | 扫描器异常时是否阻断下载 |
+
+S3 全部必需配置为空且 `UPLOAD_STORAGE_BACKEND=auto` 时系统使用本地文件系统存储。`UPLOAD_STORAGE_BACKEND=s3` 或 S3 必需项部分配置时，存储不可用会通过 `/api/v1/upload/policy` 返回，上传不会静默回退到 local。
 
 ### 启动
 

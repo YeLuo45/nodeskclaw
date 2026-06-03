@@ -26,6 +26,8 @@ kind: Ingress
 metadata:
   name: nodeskclaw-admin-ingress
   annotations:
+    # Keep these values aligned with UPLOAD_GATEWAY_PROXY_BODY_SIZE_MB,
+    # UPLOAD_PROXY_READ_TIMEOUT_SECONDS, and UPLOAD_PROXY_SEND_TIMEOUT_SECONDS.
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
@@ -55,6 +57,8 @@ kind: Ingress
 metadata:
   name: nodeskclaw-portal-ingress
   annotations:
+    # Keep these values aligned with UPLOAD_GATEWAY_PROXY_BODY_SIZE_MB,
+    # UPLOAD_PROXY_READ_TIMEOUT_SECONDS, and UPLOAD_PROXY_SEND_TIMEOUT_SECONDS.
     nginx.ingress.kubernetes.io/proxy-body-size: "50m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"

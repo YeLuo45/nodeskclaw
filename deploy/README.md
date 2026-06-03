@@ -91,6 +91,22 @@ EE 模式：
 kubectl --context <CTX> -n <NS> apply -f deploy/k8s/ingress.yaml
 ```
 
+### 文件上传相关部署配置
+
+文件上传策略由后端环境变量和 `system_configs`（系统配置表）共同决定。K8s 部署时，`deploy/init.sh` 会把 `nodeskclaw-backend/.env` 写入 `nodeskclaw-backend-env` Secret，因此上传配置必须先写进该 env 文件再初始化或覆盖 Secret。
+
+需要同步的关键项：
+
+| 配置 | 说明 |
+|------|------|
+| `UPLOAD_STORAGE_BACKEND` | 上传存储后端意图，`auto/local/s3`。目标为 S3 但必需配置缺失时不会回退 local |
+| `S3_ENDPOINT`、`S3_BUCKET`、`S3_ACCESS_KEY_ID`、`S3_SECRET_ACCESS_KEY` | S3 兼容对象存储必需配置 |
+| `AGENT_FILE_DOWNLOAD_BASE_URL` | 发给 Agent 的稳定下载 URL 基础地址，必须是 Agent Pod 可达的后端 `/api/v1` 地址 |
+| `UPLOAD_GATEWAY_PROXY_BODY_SIZE_MB` | 记录部署网关请求体上限，需与 Ingress `nginx.ingress.kubernetes.io/proxy-body-size` 和 Portal Nginx `client_max_body_size` 保持一致 |
+| `UPLOAD_PROXY_READ_TIMEOUT_SECONDS`、`UPLOAD_PROXY_SEND_TIMEOUT_SECONDS` | 需与 Ingress 读写超时和 Portal Nginx 反代超时保持一致 |
+
+如果应用上限高于网关上限，Portal 的「组织设置 > 文件上传」会展示风险提示，但实际大文件仍会被 Nginx / Ingress 先拒绝。调整大文件能力时必须同时改 `.env`、`deploy/k8s/ingress.yaml` 和 `nodeskclaw-portal/nginx.conf`。
+
 ## 标准流程
 
 Staging 验证：
